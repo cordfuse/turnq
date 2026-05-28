@@ -91,41 +91,6 @@ done
 
 ---
 
-## Python
-
-```python
-import httpx, uuid, os
-
-TOKN_URL = "https://tokn.example.com"
-CHANNEL  = "my-channel"
-headers  = {"x-api-key": os.environ["TOKN_API_KEY"], "content-type": "application/json"}
-
-client_id = str(uuid.uuid4())
-
-# Enqueue
-res        = httpx.post(f"{TOKN_URL}/channels/{CHANNEL}/enqueue",
-                        headers=headers, json={"clientId": client_id})
-request_id = res.json()["requestId"]
-
-# Subscribe — wait for your-turn
-with httpx.stream("GET", f"{TOKN_URL}/channels/{CHANNEL}/subscribe",
-                  headers=headers,
-                  params={"clientId": client_id, "requestId": request_id}) as r:
-    event = ""
-    for line in r.iter_lines():
-        if line.startswith("event:"): event = line[6:].strip()
-        elif line.startswith("data:") and event == "your-turn": break
-
-# Do work
-do_work()
-
-# Release
-httpx.post(f"{TOKN_URL}/channels/{CHANNEL}/release",
-           headers=headers, json={"clientId": client_id, "requestId": request_id})
-```
-
----
-
 ## Go
 
 ```go

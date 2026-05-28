@@ -4,7 +4,7 @@ Pronounced "token." A standalone npm package implementing a **named-channel turn
 
 Built to replace jitter-based push retry in Crosstalk. Generalizes to any FIFO serialization problem across processes or machines.
 
-**Status:** planning. Server is Express/Bun/TS. No code scaffolded yet.
+**Status:** Phase 1 complete. Core scaffolded, 18/18 tests pass.
 **Near-term driver:** Crosstalk. Politik is a named v1.1+ consumer but does not shape v1.0 scope.
 
 ---
@@ -273,10 +273,10 @@ Community contributes additional languages via the same pattern.
 - [x] `src/errors.ts` — `ToknError` class + error codes.
 - [x] `package.json` subpath exports (`./server`, `./client`).
 - [x] `Dockerfile` — `oven/bun` base, binds to `PORT` env var.
-- [ ] `render.yaml` — Render web service definition, health check on `/health`, `TOKN_API_KEY` env var declaration.
+- [x] `render.yaml` — Render web service definition, health check on `/health`, `TOKN_API_KEY` env var declaration.
 - [x] Basic test suite (in-process Express server, multiple clients, FIFO verification). 18/18 pass.
 - [ ] `SPEC.md` first draft.
-- [ ] `README.md` quick-start.
+- [x] `README.md` quick-start.
 
 ### Phase 2 — Hardening (week 2)
 

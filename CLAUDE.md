@@ -2,7 +2,7 @@
 
 # tokn — Claude context
 
-Status: **Phase 1 complete**. Core scaffolded, 18/18 tests pass. `render.yaml` and `SPEC.md` still pending. See [PLAN.md](PLAN.md).
+Status: **Phase 1 complete**. Core scaffolded, 18/18 tests pass. `SPEC.md` still pending. See [PLAN.md](PLAN.md).
 
 ## Project
 
@@ -12,7 +12,7 @@ Status: **Phase 1 complete**. Core scaffolded, 18/18 tests pass. `render.yaml` a
 
 ## What this repo is for right now
 
-Holds the plan-of-record. Implementation has not started. Any code-related work needs to start with the protocol section of `PLAN.md` and align with the build phases.
+Phase 1 is complete (core scaffolded, tests passing). Phase 2 hardening is next. Any code-related work needs to start with the protocol section of `PLAN.md` and align with the build phases.
 
 ## Important pointers
 
