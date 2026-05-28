@@ -129,6 +129,16 @@ GET /health   → 200 { ok: true }
 
 Crosstalk agents connect to the Render-hosted URL. Zero ops: Render handles uptime, restarts, TLS.
 
+**Local dev:** `tokn.linux.internal` resolves to cachy's IPv4. Use this in `docker-compose.yml` for local testing before pushing to Render. The `TOKN_URL` env var swaps between environments:
+
+```
+# local (.env)
+TOKN_URL=http://tokn.linux.internal:3000
+
+# render (set in dashboard)
+TOKN_URL=https://tokn.onrender.com
+```
+
 ---
 
 ## Wire-level protocol
