@@ -1,8 +1,10 @@
 # tokn
 
-Pronounced "token." A named-channel turn coordinator. Clients join a channel queue, receive their turn, do arbitrary work, release. The server is resource-agnostic — knows nothing about git, deploys, or any specific operation.
+When multiple processes need exclusive access to a shared resource — a git branch, a deploy slot, a database migration — the naive fix is retry with jitter: wait a random amount of time, try again, hope for the best. It works until it doesn't. Under load, agents collide repeatedly, waste work they've already done, and latency becomes unpredictable. There's no ordering guarantee, no way to know your position, and no upper bound on how long you might wait.
 
-Built to replace jitter-based push retry in Crosstalk. Generalizes to any FIFO serialization problem across processes or machines.
+tokn replaces that gamble with a queue. Clients enqueue on a named channel, receive their turn when they're at the front, do their work, and release. Exactly one client holds the token at a time. Order is strict FIFO. No retries, no conflicts, no tuning magic numbers.
+
+Pronounced "token." The server is resource-agnostic — it knows nothing about git, deploys, or any specific operation. It just enforces turns.
 
 **Status:** Phase 1 complete. See [PLAN.md](PLAN.md) for the full design.
 

@@ -1,14 +1,22 @@
 services:
   tokn:
     build: .
+    container_name: tokn
     ports:
-      - "3000:3000"
+      - "3003:3003"
     environment:
       - TOKN_API_KEY=${TOKN_API_KEY}
-      - PORT=3000
+      - PORT=3003
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:3003/health"]
       interval: 10s
       timeout: 5s
       retries: 3
+    networks:
+      - proxy_net
+      - default
+
+networks:
+  proxy_net:
+    external: true

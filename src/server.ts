@@ -119,6 +119,9 @@ export class ToknServer {
       requestId: entry.requestId,
       reason: 'lease_expired',
     });
+    ch.active = null;
+    ch.leaseTimer = null;
+    ch.queue.shift();
     this.broadcast(ch, 'turn-completed', {
       channel: ch.name,
       clientId: entry.clientId,
@@ -127,9 +130,6 @@ export class ToknServer {
     });
     entry.subscriber?.close();
     entry.subscriber = null;
-    ch.active = null;
-    ch.leaseTimer = null;
-    ch.queue.shift();
     this.grantTurn(ch);
   }
 
@@ -140,6 +140,11 @@ export class ToknServer {
       clearTimeout(ch.leaseTimer);
       ch.leaseTimer = null;
     }
+    // Null active and shift queue BEFORE closing subscriber so that
+    // any synchronous/microtask close event (handleWsDisconnect) sees
+    // ch.active !== entry and does not double-advance the queue.
+    ch.active = null;
+    ch.queue.shift();
     this.broadcast(ch, 'turn-completed', {
       channel: ch.name,
       clientId: entry.clientId,
@@ -148,8 +153,6 @@ export class ToknServer {
     });
     entry.subscriber?.close();
     entry.subscriber = null;
-    ch.active = null;
-    ch.queue.shift();
     this.grantTurn(ch);
   }
 
