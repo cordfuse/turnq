@@ -2,7 +2,7 @@
 
 # tokn — Claude context
 
-Status: **planning only**. No code scaffolded. The canonical design lives in [PLAN.md](PLAN.md).
+Status: **Phase 1 complete**. Core scaffolded, 18/18 tests pass. `render.yaml` and `SPEC.md` still pending. See [PLAN.md](PLAN.md).
 
 ## Project
 

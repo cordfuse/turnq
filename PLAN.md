@@ -267,14 +267,14 @@ Community contributes additional languages via the same pattern.
 
 ### Phase 1 — Core package (week 1)
 
-- [ ] `src/server.ts` — `ToknServer` class (Express, create/delete/list channels, enqueue, release, lease/timeout, WSS + SSE on same endpoint, auth middleware, `GET /health`).
-- [ ] `src/client.ts` — `ToknClient` (`withTurn`, `createChannel`, `subscribe`, `observe`, WSS-first/SSE-fallback, reconnect, `X-Api-Key` on every request).
-- [ ] `src/protocol.ts` — all message types and event types as TypeScript interfaces.
-- [ ] `src/errors.ts` — `ToknError` class + error codes.
-- [ ] `package.json` subpath exports (`./server`, `./client`).
-- [ ] `Dockerfile` — `oven/bun` base, binds to `PORT` env var.
+- [x] `src/server.ts` — `ToknServer` class (Express, create/delete/list channels, enqueue, release, lease/timeout, WSS + SSE on same endpoint, auth middleware, `GET /health`).
+- [x] `src/client.ts` — `ToknClient` (`withTurn`, `createChannel`, `subscribe`, `observe`, WSS-first/SSE-fallback, reconnect, `X-Api-Key` on every request).
+- [x] `src/protocol.ts` — all message types and event types as TypeScript interfaces.
+- [x] `src/errors.ts` — `ToknError` class + error codes.
+- [x] `package.json` subpath exports (`./server`, `./client`).
+- [x] `Dockerfile` — `oven/bun` base, binds to `PORT` env var.
 - [ ] `render.yaml` — Render web service definition, health check on `/health`, `TOKN_API_KEY` env var declaration.
-- [ ] Basic test suite (in-process Express server, multiple clients, FIFO verification).
+- [x] Basic test suite (in-process Express server, multiple clients, FIFO verification). 18/18 pass.
 - [ ] `SPEC.md` first draft.
 - [ ] `README.md` quick-start.
 
@@ -289,8 +289,8 @@ Community contributes additional languages via the same pattern.
 
 ### Phase 3 — Crosstalk integration (week 3)
 
-- [ ] Replace `pushWithRetry` in `cordfuse/crosstalk-runtime`.
-- [ ] Remove jitter config (or deprecate).
+- [x] Replace `pushWithRetry` in `cordfuse/crosstalk-runtime` — `feat/tokn-integration` branch.
+- [x] Remove jitter config (or deprecate) — jitter kept as fallback, tokn is opt-in via config.
 - [ ] Update `CROSSTALK.md` session-open step to use `tokn` coordination.
 - [ ] Field validation: 5 peer agents, 0 push failures over a multi-hour session.
 
