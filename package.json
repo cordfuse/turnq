@@ -1,0 +1,25 @@
+{
+  "name": "@cordfuse/tokn",
+  "version": "0.1.0",
+  "description": "Named-channel turn coordinator. WSS-first, SSE-fallback.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./server": "./src/server.ts",
+    "./client": "./src/client.ts"
+  },
+  "scripts": {
+    "start": "bun run src/main.ts",
+    "dev": "bun --watch src/main.ts",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "ws": "^8.17.1"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/ws": "^8.5.12",
+    "bun-types": "latest"
+  }
+}

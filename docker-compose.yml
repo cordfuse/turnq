@@ -1,0 +1,14 @@
+services:
+  tokn:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      - TOKN_API_KEY=${TOKN_API_KEY}
+      - PORT=3000
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
