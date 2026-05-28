@@ -2,9 +2,9 @@
 
 A named-channel turn coordinator. Clients join a channel queue, receive their turn, do arbitrary work, release. The server is resource-agnostic — knows nothing about git, deploys, or any specific operation.
 
-Built to replace jitter-based push retry in Crosstalk and to provide the chamber-transport primitive for Politik. Generalizes to any FIFO serialization problem across processes or machines.
+Built to replace jitter-based push retry in Crosstalk. Generalizes to any FIFO serialization problem across processes or machines.
 
-**Status:** planning only. No code yet. See [PLAN.md](PLAN.md) for the full design.
+**Status:** planning only. No code yet. Near-term scope is Crosstalk; other use cases (Politik, deploy queues, migrations) are downstream beneficiaries. See [PLAN.md](PLAN.md) for the full design.
 
 ---
 

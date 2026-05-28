@@ -2,9 +2,10 @@
 
 A standalone npm package implementing a **named-channel turn coordinator**. Clients connect over HTTP, join a named channel queue, receive a "your turn" signal via Server-Sent Events, run any arbitrary work locally, report success or failure, and release. The server is resource-agnostic — it knows nothing about git, deploys, or any specific operation.
 
-Replaces jitter-based push retry in Crosstalk. Replaces the chamber-transport question in Politik. Generalizes to any FIFO serialization problem across processes or machines.
+Built to replace jitter-based push retry in Crosstalk. Generalizes to any FIFO serialization problem across processes or machines.
 
 **Status:** planning. Server is Bun/TS. No code scaffolded yet.
+**Near-term driver:** Crosstalk. Other consumers (Politik, deploy queues, migration runners) are future considerations that don't shape v1.0 scope.
 
 ---
 
@@ -14,7 +15,7 @@ Replaces jitter-based push retry in Crosstalk. Replaces the chamber-transport qu
 - First genuine FIFO cross-process/cross-machine turn coordination as a tiny npm primitive.
 - No Redis, no BullMQ, no infrastructure beyond one Node process.
 - Generalizes beyond git: deploys, migrations, bulk sends, any serialized operation.
-- Dogfooded immediately in two Cordfuse projects (Crosstalk, Politik).
+- Dogfooded immediately in Crosstalk to replace the existing `pushWithRetry` / jitter shim — real field validation in a project with active users.
 
 The framing: jitter answers *"is it free?"* — turnstile answers *"when is it my turn?"* Same conceptual model as the 1984 token ring, reimagined as a modern primitive.
 
@@ -152,9 +153,11 @@ The server only guarantees turn ordering. The client's work inside `withTurn` is
 
 ---
 
-## Integration targets
+## Integration target (near-term, drives v1.0)
 
 ### Crosstalk (`cordfuse/crosstalk-runtime`)
+
+This is the entire v1.0 driver. Turnstile exists to solve Crosstalk's collision problem first; everything else is downstream.
 
 - Replace `pushWithRetry` shim in `src/git.ts`.
 - Replace per-remote push queue in `src/transports/git.ts`.
@@ -162,12 +165,18 @@ The server only guarantees turn ordering. The client's work inside `withTurn` is
 - `commitAndPush` becomes `withTurn(remote, () => pull + commit + push)`.
 - Zero push rejections by design. Retry loop deleted entirely.
 
-### Politik
+---
 
-- Speaker pattern's coordination layer becomes a turnstile client.
-- Validation logic (motion vs charter) stays in the speaker — turnstile is dumb about content.
-- Step events become Hansard's granular audit record.
-- Same turnstile server can host multiple Politik sessions on separate channels OR run a per-session ephemeral instance.
+## Future use cases (not driving v1.0)
+
+Turnstile is designed as a general-purpose FIFO coordination primitive. Beyond Crosstalk, candidate consumers exist — none of which shape current scope:
+
+- **Politik** — write serialization for the speaker pattern in governance proceedings. Will consume turnstile when Politik's reference implementation begins (currently in PLAN phase per `~/Repos/STRATEGY.md`; not happening in turnstile's v1.0 timeframe).
+- **Deploy queues** — serializing production deploys across team members or environments.
+- **Migration runners** — ensuring database/schema migrations apply one at a time across a fleet.
+- **Bulk send coordination** — any process where multiple workers must serialize against a shared resource.
+
+These are illustrative, not commitments. If you find yourself making protocol decisions to accommodate a future use case rather than Crosstalk, push back — the principle is that Crosstalk-shaped requirements drive v1.0 and everything else benefits from the resulting primitive.
 
 ---
 

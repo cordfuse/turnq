@@ -8,7 +8,7 @@ Status: **planning only**. No code scaffolded. The canonical design lives in [PL
 
 `@cordfuse/turnstile` — named-channel turn coordinator. HTTP + SSE protocol. Bun/TypeScript server, reference TS client, additional languages via examples.
 
-Originated from Crosstalk's git push collision problem and Politik's chamber transport question. Both projects will consume turnstile as their write-serialization primitive.
+**Near-term driver:** Crosstalk. v1.0 exists to replace `pushWithRetry` / jitter in `cordfuse/crosstalk-runtime`. Other Cordfuse consumers (Politik, future deploy/migration coordinators) may adopt turnstile downstream but don't shape v1.0 scope. If you find a design decision being pulled by a non-Crosstalk requirement, that's the signal to push back.
 
 ## What this repo is for right now
 
@@ -16,8 +16,9 @@ Holds the plan-of-record. Implementation has not started. Any code-related work 
 
 ## Important pointers
 
-- **Source memory** (private, in `steve-krisjanovs/cortex`): `data/memories/20260528T035510.30Z-28a2f8303f2c3165.md` — original execution plan from the cortex session that produced the idea. PLAN.md in this repo supersedes it where they conflict (notably the WebSocket → HTTP+SSE protocol shift).
-- **Integration consumers**: `cordfuse/crosstalk-runtime` (replaces `pushWithRetry`) and `cordfuse/politik` (chamber transport).
+- **Source memory** (private, in `steve-krisjanovs/cortex`): `data/memories/20260528T035510.30Z-28a2f8303f2c3165.md` — original execution plan from the cortex session that produced the idea. PLAN.md in this repo supersedes it where they conflict (notably the WebSocket → HTTP+SSE protocol shift and the Crosstalk-only v1.0 scope).
+- **Integration consumer (near-term)**: `cordfuse/crosstalk-runtime` — replaces `pushWithRetry`. Drives v1.0.
+- **Future consumers** (not driving scope): `cordfuse/politik` (chamber transport, when reference implementation begins) and any other Cordfuse project needing FIFO coordination.
 - **License**: MIT.
 
 ## Doctrine
