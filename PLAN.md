@@ -1,6 +1,6 @@
-# Turnstile — Plan
+# Spkr — Plan
 
-A standalone npm package implementing a **named-channel turn coordinator**. Clients connect over HTTP, join a named channel queue, receive a "your turn" signal via Server-Sent Events, run any arbitrary work locally, report success or failure, and release. The server is resource-agnostic — it knows nothing about git, deploys, or any specific operation.
+Pronounced "speaker." A standalone npm package implementing a **named-channel turn coordinator**. Clients connect over HTTP, join a named channel queue, receive a "your turn" signal via Server-Sent Events, run any arbitrary work locally, report success or failure, and release. The server is resource-agnostic — it knows nothing about git, deploys, or any specific operation.
 
 Built to replace jitter-based push retry in Crosstalk. Generalizes to any FIFO serialization problem across processes or machines.
 
@@ -9,15 +9,26 @@ Built to replace jitter-based push retry in Crosstalk. Generalizes to any FIFO s
 
 ---
 
+## The metaphor
+
+Two metaphors compose, and the name captures both:
+
+- **Hub-and-spoke** — `spkr` is the hub. Clients are spokes. Spokes connect to one hub. The hub coordinates which spoke speaks next.
+- **Parliamentary chamber** — the speaker grants the floor. Members yield to the speaker. The speaker maintains order, records the proceeding, and never speaks out of turn themselves.
+
+Both metaphors describe the same architecture from different angles. The name `spkr` makes the parliamentary one explicit and the wheel one implicit.
+
+---
+
 ## Why it matters
 
-- Jitter is probabilistic. Turnstile is deterministic.
+- Jitter is probabilistic. `spkr` is deterministic.
 - First genuine FIFO cross-process/cross-machine turn coordination as a tiny npm primitive.
 - No Redis, no BullMQ, no infrastructure beyond one Node process.
 - Generalizes beyond git: deploys, migrations, bulk sends, any serialized operation.
 - Dogfooded immediately in Crosstalk to replace the existing `pushWithRetry` / jitter shim — real field validation in a project with active users.
 
-The framing: jitter answers *"is it free?"* — turnstile answers *"when is it my turn?"* Same conceptual model as the 1984 token ring, reimagined as a modern primitive.
+The framing: jitter answers *"is it free?"* — `spkr` answers *"when is it my turn?"* Same conceptual model as the 1984 token ring, reimagined as a modern npm primitive.
 
 ---
 
@@ -83,7 +94,7 @@ Rather than maintain official SDKs in seven languages, ship one great reference 
 
 ### Artifacts
 
-- **`client-ts/`** — packaged npm reference client (`@cordfuse/turnstile-client`). Bun-native, Node-compatible. The canonical implementation, with full test suite. Provides the ergonomic `withTurn(channel, async (ctx) => work)` API.
+- **`client-ts/`** — packaged npm reference client (`@cordfuse/spkr-client`). Bun-native, Node-compatible. The canonical implementation, with full test suite. Provides the ergonomic `withTurn(channel, async (ctx) => work)` API.
 - **`SPEC.md`** — protocol specification. State machine, sequence semantics, error recovery contracts, SSE event schemas. Markdown, human-readable. This is the actual contract.
 - **`client-examples/`** — working code in additional languages, demonstrating the protocol in idiomatic form. Not packaged SDKs — just runnable examples. Communities maintain their own; we maintain the pattern.
 
@@ -114,9 +125,9 @@ OpenAPI is **complementary**, not a replacement. If/when added, it gets generate
 ## Reference client API (ergonomic surface)
 
 ```typescript
-import { TurnClient } from '@cordfuse/turnstile-client';
+import { SpkrClient } from '@cordfuse/spkr-client';
 
-const client = new TurnClient('https://turnstile.example.com');
+const client = new SpkrClient('https://spkr.example.com');
 
 await client.createChannel('git-push-main', { leaseMs: 60_000 });
 
@@ -157,11 +168,11 @@ The server only guarantees turn ordering. The client's work inside `withTurn` is
 
 ### Crosstalk (`cordfuse/crosstalk-runtime`)
 
-This is the entire v1.0 driver. Turnstile exists to solve Crosstalk's collision problem first; everything else is downstream.
+This is the entire v1.0 driver. `spkr` exists to solve Crosstalk's collision problem first; everything else is downstream.
 
 - Replace `pushWithRetry` shim in `src/git.ts`.
 - Replace per-remote push queue in `src/transports/git.ts`.
-- Agent startup: connect to turnstile, create/join channels per transport remote.
+- Agent startup: connect to `spkr`, create/join channels per transport remote.
 - `commitAndPush` becomes `withTurn(remote, () => pull + commit + push)`.
 - Zero push rejections by design. Retry loop deleted entirely.
 
@@ -169,9 +180,9 @@ This is the entire v1.0 driver. Turnstile exists to solve Crosstalk's collision 
 
 ## Future use cases (not driving v1.0)
 
-Turnstile is designed as a general-purpose FIFO coordination primitive. Beyond Crosstalk, candidate consumers exist — none of which shape current scope:
+`spkr` is designed as a general-purpose FIFO coordination primitive. Beyond Crosstalk, candidate consumers exist — none of which shape current scope:
 
-- **Politik** — write serialization for the speaker pattern in governance proceedings. Will consume turnstile when Politik's reference implementation begins (currently in PLAN phase per `~/Repos/STRATEGY.md`; not happening in turnstile's v1.0 timeframe).
+- **Politik** — write serialization for the speaker pattern in governance proceedings. Will consume `spkr` when Politik's reference implementation begins (currently in PLAN phase per `~/Repos/STRATEGY.md`; not happening in `spkr`'s v1.0 timeframe).
 - **Deploy queues** — serializing production deploys across team members or environments.
 - **Migration runners** — ensuring database/schema migrations apply one at a time across a fleet.
 - **Bulk send coordination** — any process where multiple workers must serialize against a shared resource.
@@ -184,10 +195,10 @@ These are illustrative, not commitments. If you find yourself making protocol de
 
 ### Phase 1 — Core package (week 1)
 
-- [ ] `src/server.ts` — `TurnServer` class (create/delete/list channels, enqueue, release, lease/timeout).
-- [ ] `src/client.ts` — `TurnClient` (`withTurn`, `createChannel`, `subscribe`, `observe`, reconnect).
+- [ ] `src/server.ts` — `SpkrServer` class (create/delete/list channels, enqueue, release, lease/timeout).
+- [ ] `src/client.ts` — `SpkrClient` (`withTurn`, `createChannel`, `subscribe`, `observe`, reconnect).
 - [ ] `src/protocol.ts` — all message types and SSE event types as TypeScript interfaces.
-- [ ] `src/errors.ts` — `TurnError` class + error codes.
+- [ ] `src/errors.ts` — `SpkrError` class + error codes.
 - [ ] Basic test suite (in-process Hono server, multiple clients, FIFO verification).
 - [ ] `SPEC.md` first draft.
 - [ ] `README.md` quick-start.
@@ -199,21 +210,21 @@ These are illustrative, not commitments. If you find yourself making protocol de
 - [ ] `requestId` correlation across requests.
 - [ ] Step reporting end-to-end.
 - [ ] Channel observer SSE stream.
-- [ ] `templates/systemd/turnstile.service`.
+- [ ] `templates/systemd/spkr.service`.
 - [ ] `client-examples/curl/`, `client-examples/python/`, `client-examples/go/`.
 
 ### Phase 3 — Crosstalk integration (week 3)
 
 - [ ] Replace `pushWithRetry` in `cordfuse/crosstalk-runtime`.
 - [ ] Remove jitter config (or deprecate).
-- [ ] Update `CROSSTALK.md` session-open step to use turnstile coordination.
+- [ ] Update `CROSSTALK.md` session-open step to use `spkr` coordination.
 - [ ] Field validation: 5 peer agents, 0 push failures over a multi-hour session.
 
 ### Phase 4 — Publish (week 4)
 
 - [ ] Final SPEC.md, README.md polish.
-- [ ] `npm publish @cordfuse/turnstile-server`.
-- [ ] `npm publish @cordfuse/turnstile-client`.
+- [ ] `npm publish @cordfuse/spkr-server`.
+- [ ] `npm publish @cordfuse/spkr-client`.
 - [ ] GitHub release v1.0.0.
 - [ ] Announcement coordinated with Crosstalk's launch wave (target: post-STD-return, alongside the rest of the Cordfuse public push).
 
@@ -232,6 +243,6 @@ These are illustrative, not commitments. If you find yourself making protocol de
 
 ## Genesis
 
-Originated in Cortex dev session 2026-05-26 with dev team actors loaded. Source memory: `data/memories/20260528T035510.30Z-28a2f8303f2c3165.md` in `steve-krisjanovs/cortex`. Original protocol design specified WebSocket; revised to HTTP + SSE during design discussion 2026-05-28.
+Originated in Cortex dev session 2026-05-26 with dev team actors loaded. Source memory: `data/memories/20260528T035510.30Z-28a2f8303f2c3165.md` in `steve-krisjanovs/cortex`. Original codename was `turnstile`; renamed to `spkr` 2026-05-28 to match the parliamentary metaphor more directly and align with Cordfuse's vyzr-style respelling convention. Original protocol design specified WebSocket; revised to HTTP + SSE during the same design discussion.
 
-Insight: jitter answers *"is it free?"* — turnstile answers *"when is it my turn?"* Pattern is analogous to the 1984 token ring, reimagined as a modern npm primitive.
+Insight: jitter answers *"is it free?"* — `spkr` answers *"when is it my turn?"* Pattern is analogous to the 1984 token ring, reimagined as a modern npm primitive.

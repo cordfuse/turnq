@@ -1,6 +1,6 @@
-# turnstile
+# spkr
 
-A named-channel turn coordinator. Clients join a channel queue, receive their turn, do arbitrary work, release. The server is resource-agnostic — knows nothing about git, deploys, or any specific operation.
+Pronounced "speaker." A named-channel turn coordinator. Clients join a channel queue, receive their turn, do arbitrary work, release. The server is resource-agnostic — knows nothing about git, deploys, or any specific operation.
 
 Built to replace jitter-based push retry in Crosstalk. Generalizes to any FIFO serialization problem across processes or machines.
 
@@ -10,7 +10,11 @@ Built to replace jitter-based push retry in Crosstalk. Generalizes to any FIFO s
 
 ## In one sentence
 
-Jitter answers *"is it free?"* — turnstile answers *"when is it my turn?"*
+Jitter answers *"is it free?"* — spkr answers *"when is it my turn?"*
+
+## The metaphor
+
+`spkr` is the hub. Clients are spokes. The hub is also the speaker in a parliamentary sense — grants the floor, maintains order, and never speaks out of turn themselves. Both metaphors describe the same architecture from different angles.
 
 ## Protocol at a glance
 
