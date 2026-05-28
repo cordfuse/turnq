@@ -62,11 +62,82 @@ The client tries WebSocket first. If the connection fails (corporate proxy, L7 f
 
 ---
 
-## Wire-level protocol
+## Authentication
 
-Actions are plain HTTP POST/DELETE. Notifications arrive over WSS or SSE depending on what the client negotiated.
+Every request — HTTP, WSS upgrade, SSE — must carry the API key. The server rejects with `401` before any channel logic runs.
 
 ```
+X-Api-Key: <key>
+```
+
+The key is an env var on both sides:
+
+```
+# server
+TOKN_API_KEY=...
+
+# client
+TOKN_API_KEY=...
+```
+
+Auth is injected as middleware on `ToknServer`, not hardcoded. The default implementation checks `X-Api-Key`. Callers can replace it entirely:
+
+```ts
+const server = new ToknServer({
+  auth: (req) => req.headers['x-api-key'] === process.env.TOKN_API_KEY,
+});
+
+const client = new ToknClient('https://tokn.example.com', {
+  apiKey: process.env.TOKN_API_KEY,
+});
+```
+
+**v1 limitations (known, acceptable for trusted-network use):**
+
+- Single shared key — no per-client identity, no per-channel ACL
+- Key rotation requires all clients to update simultaneously
+- Compromise of the key = full rotation required
+
+**v2 hooks reserved:**
+
+- `auth: (req) => clientId | null` — returning a `clientId` enables per-client audit trail at zero protocol cost
+- Per-channel ACL via channel metadata (`{ read: string[], write: string[] }`)
+- JWT drops in naturally once `clientId` is a first-class concept
+
+---
+
+## Deployment: Docker + Render
+
+The server ships as a Docker image. Render is the default hosting target.
+
+```
+Dockerfile          — oven/bun base, copies src, exposes PORT
+render.yaml         — Render service definition (web service, health check, env vars)
+```
+
+Render specifics:
+- `PORT` env var injected by Render; server binds to `process.env.PORT || 3000`
+- `TOKN_API_KEY` set in Render dashboard (not committed)
+- Auto-deploy on push to `main`
+- HTTPS termination handled by Render — server speaks plain HTTP internally
+
+Health check endpoint (required by Render):
+
+```
+GET /health   → 200 { ok: true }
+```
+
+Crosstalk agents connect to the Render-hosted URL. Zero ops: Render handles uptime, restarts, TLS.
+
+---
+
+## Wire-level protocol
+
+All endpoints require `X-Api-Key` header. Actions are plain HTTP POST/DELETE. Notifications arrive over WSS or SSE depending on what the client negotiated.
+
+```
+GET    /health                            → { ok: true }
+
 POST   /channels                          create channel
 DELETE /channels/{name}                   delete channel
 GET    /channels                          list channels
@@ -186,11 +257,13 @@ Community contributes additional languages via the same pattern.
 
 ### Phase 1 — Core package (week 1)
 
-- [ ] `src/server.ts` — `ToknServer` class (Express, create/delete/list channels, enqueue, release, lease/timeout, WSS + SSE on same endpoint).
-- [ ] `src/client.ts` — `ToknClient` (`withTurn`, `createChannel`, `subscribe`, `observe`, WSS-first/SSE-fallback, reconnect).
+- [ ] `src/server.ts` — `ToknServer` class (Express, create/delete/list channels, enqueue, release, lease/timeout, WSS + SSE on same endpoint, auth middleware, `GET /health`).
+- [ ] `src/client.ts` — `ToknClient` (`withTurn`, `createChannel`, `subscribe`, `observe`, WSS-first/SSE-fallback, reconnect, `X-Api-Key` on every request).
 - [ ] `src/protocol.ts` — all message types and event types as TypeScript interfaces.
 - [ ] `src/errors.ts` — `ToknError` class + error codes.
 - [ ] `package.json` subpath exports (`./server`, `./client`).
+- [ ] `Dockerfile` — `oven/bun` base, binds to `PORT` env var.
+- [ ] `render.yaml` — Render web service definition, health check on `/health`, `TOKN_API_KEY` env var declaration.
 - [ ] Basic test suite (in-process Express server, multiple clients, FIFO verification).
 - [ ] `SPEC.md` first draft.
 - [ ] `README.md` quick-start.
@@ -202,7 +275,6 @@ Community contributes additional languages via the same pattern.
 - [ ] `requestId` correlation across requests.
 - [ ] Step reporting end-to-end.
 - [ ] Channel observer stream (WSS + SSE).
-- [ ] `templates/systemd/tokn.service`.
 - [ ] `client-examples/curl/`, `client-examples/go/`.
 
 ### Phase 3 — Crosstalk integration (week 3)
