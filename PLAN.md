@@ -1,11 +1,11 @@
-# Spkr — Plan
+# tokn — Plan
 
-Pronounced "speaker." A standalone npm package implementing a **named-channel turn coordinator**. Clients connect over HTTP, join a named channel queue, receive a "your turn" signal via Server-Sent Events, run any arbitrary work locally, report success or failure, and release. The server is resource-agnostic — it knows nothing about git, deploys, or any specific operation.
+Pronounced "token." A standalone npm package implementing a **named-channel turn coordinator**. Clients connect, join a named channel queue, receive a "your turn" signal, run any arbitrary work locally, report success or failure, and release. The server is resource-agnostic — it knows nothing about git, deploys, or any specific operation.
 
 Built to replace jitter-based push retry in Crosstalk. Generalizes to any FIFO serialization problem across processes or machines.
 
-**Status:** planning. Server is Bun/TS. No code scaffolded yet.
-**Near-term driver:** Crosstalk. Other consumers (Politik, deploy queues, migration runners) are future considerations that don't shape v1.0 scope.
+**Status:** planning. Server is Express/Bun/TS. No code scaffolded yet.
+**Near-term driver:** Crosstalk. Politik is a named v1.1+ consumer but does not shape v1.0 scope.
 
 ---
 
@@ -13,37 +13,58 @@ Built to replace jitter-based push retry in Crosstalk. Generalizes to any FIFO s
 
 Two metaphors compose, and the name captures both:
 
-- **Hub-and-spoke** — `spkr` is the hub. Clients are spokes. Spokes connect to one hub. The hub coordinates which spoke speaks next.
-- **Parliamentary chamber** — the speaker grants the floor. Members yield to the speaker. The speaker maintains order, records the proceeding, and never speaks out of turn themselves.
+- **Token ring (1984)** — only the node holding the token may transmit. `tokn` is the token: it circulates deterministically, one holder at a time.
+- **Hub-and-spoke** — `tokn` is the hub. Clients are spokes. The hub decides which spoke holds the token next.
 
-Both metaphors describe the same architecture from different angles. The name `spkr` makes the parliamentary one explicit and the wheel one implicit.
+The framing: jitter answers *"is it free?"* — `tokn` answers *"when is it my turn?"*
 
 ---
 
 ## Why it matters
 
-- Jitter is probabilistic. `spkr` is deterministic.
+- Jitter is probabilistic. `tokn` is deterministic.
 - First genuine FIFO cross-process/cross-machine turn coordination as a tiny npm primitive.
-- No Redis, no BullMQ, no infrastructure beyond one Node process.
+- No Redis, no BullMQ, no infrastructure beyond one Node/Bun process.
 - Generalizes beyond git: deploys, migrations, bulk sends, any serialized operation.
-- Dogfooded immediately in Crosstalk to replace the existing `pushWithRetry` / jitter shim — real field validation in a project with active users.
-
-The framing: jitter answers *"is it free?"* — `spkr` answers *"when is it my turn?"* Same conceptual model as the 1984 token ring, reimagined as a modern npm primitive.
+- Dogfooded immediately in Crosstalk to replace `pushWithRetry` / jitter shim — real field validation with active users.
 
 ---
 
-## Protocol decision: HTTP + SSE (not WebSocket)
+## Package structure
 
-The original design specified WebSocket. Revised to HTTP + Server-Sent Events for these reasons:
+One package, two subpath exports. Server and client share protocol types at root.
 
-- **Universal language support.** Every language ships HTTP in its stdlib. WebSocket clients vary in quality and idioms. Drops the multi-language client problem from a maintenance trap to a 30-line wrapper per language.
-- **Enterprise survivability.** Corporate proxies are erratic on WebSocket (idle timeouts, SSL inspection, L7 firewalls). HTTPS + SSE works through everything that allows dev workflows.
-- **Latency penalty is irrelevant.** WebSocket push ≈ 10 ms. SSE push ≈ 100 ms. Turn coordination operates on second-to-minute work units; the 90 ms is invisible.
-- **Disconnect detection via lease/timeout.** WebSocket's automatic disconnect handling was nice, but the lease/timeout pattern already required for hung work also covers client-crash detection. No new mechanism needed.
+```
+@cordfuse/tokn
+  imports:
+    '@cordfuse/tokn'          → { ToknServer, ToknClient, ...protocol types }
+    '@cordfuse/tokn/server'   → { ToknServer }
+    '@cordfuse/tokn/client'   → { ToknClient }
+```
 
-### Wire-level protocol
+Single package means one version to pin, one changelog, shared protocol types that can't drift between server and client.
 
-Actions are plain HTTP. Notifications are SSE streams. JSON bodies throughout.
+---
+
+## Transport: WSS-first, SSE fallback
+
+The client tries WebSocket first. If the connection fails (corporate proxy, L7 firewall, SSL inspection), it falls back to HTTP + SSE automatically. The server supports both connection types simultaneously.
+
+**Why WSS-first:**
+- WebSocket gives ~10 ms push latency vs ~100 ms for SSE polling. Negligible for turn coordination (work units are seconds-to-minutes), but WSS also provides clean disconnect detection without lease polling.
+- Most dev environments and direct server connections support WSS fine.
+
+**Why SSE fallback:**
+- Corporate proxies kill idle WebSocket connections. HTTPS + SSE survives everything that allows dev workflows.
+- Covers the long tail of enterprise and restricted environments.
+
+**Server implementation:** Express server with a `/channels/{name}/subscribe` endpoint that accepts both `Upgrade: websocket` and regular GET requests (SSE).
+
+---
+
+## Wire-level protocol
+
+Actions are plain HTTP POST/DELETE. Notifications arrive over WSS or SSE depending on what the client negotiated.
 
 ```
 POST   /channels                          create channel
@@ -51,15 +72,15 @@ DELETE /channels/{name}                   delete channel
 GET    /channels                          list channels
 
 POST   /channels/{name}/enqueue           → { requestId, position }
-GET    /channels/{name}/subscribe         SSE stream — your-turn / queued updates / timeout
+GET    /channels/{name}/subscribe         WSS or SSE — your-turn / position updates / timeout
 POST   /channels/{name}/release           complete your turn
 POST   /channels/{name}/abort             abort from queue
 
 POST   /channels/{name}/steps             granular step reporting during a turn (optional)
-GET    /channels/{name}/observe           SSE stream — turn-started / turn-completed / step events (read-only)
+GET    /channels/{name}/observe           WSS or SSE — turn-started / turn-completed / step events (read-only)
 ```
 
-### Server → Client SSE events
+### Server → Client events
 
 ```
 queued           { channel, requestId, position }
@@ -88,46 +109,12 @@ INTERNAL_ERROR
 
 ---
 
-## Client architecture: reference client + spec + examples
-
-Rather than maintain official SDKs in seven languages, ship one great reference client and let other languages consume the protocol directly.
-
-### Artifacts
-
-- **`client-ts/`** — packaged npm reference client (`@cordfuse/spkr-client`). Bun-native, Node-compatible. The canonical implementation, with full test suite. Provides the ergonomic `withTurn(channel, async (ctx) => work)` API.
-- **`SPEC.md`** — protocol specification. State machine, sequence semantics, error recovery contracts, SSE event schemas. Markdown, human-readable. This is the actual contract.
-- **`client-examples/`** — working code in additional languages, demonstrating the protocol in idiomatic form. Not packaged SDKs — just runnable examples. Communities maintain their own; we maintain the pattern.
-
-### Example languages at launch
-
-Initial `client-examples/` directories:
-
-- `curl/` — raw HTTP via bash + curl. Demonstrates the protocol without language opinion.
-- `typescript/` (lives as `client-ts/`, the published reference)
-- `python/` — async + httpx. Broadest demand outside JS.
-- `go/` — idiomatic goroutines + channels. Natural fit for the DevOps audience.
-
-Later additions (`csharp`, `rust`, `java`, `powershell`) come either from Cordfuse or via community contributions. The README explicitly invites contributions with the pattern set by the four launch examples.
-
-### Why not OpenAPI alone?
-
-OpenAPI is great for discrete REST verbs and gets you Swagger UI for free, but:
-
-- SSE streams aren't first-class in OpenAPI tooling.
-- Sequence semantics (`enqueue → subscribe → wait → work → release`) can't be expressed.
-- Error recovery contracts (what to do on `LEASE_EXPIRED`) need prose somewhere outside the spec.
-- Generated SDKs from `openapi-generator-cli` are usually clunky and not idiomatic.
-
-OpenAPI is **complementary**, not a replacement. If/when added, it gets generated from Hono route annotations at near-zero marginal cost. Not a v1.0 priority.
-
----
-
-## Reference client API (ergonomic surface)
+## Client API (ergonomic surface)
 
 ```typescript
-import { SpkrClient } from '@cordfuse/spkr-client';
+import { ToknClient } from '@cordfuse/tokn/client';
 
-const client = new SpkrClient('https://spkr.example.com');
+const client = new ToknClient('https://tokn.example.com');
 
 await client.createChannel('git-push-main', { leaseMs: 60_000 });
 
@@ -141,7 +128,7 @@ client.on('timeout', (channel, reason) => { /* handle revoked turn */ });
 client.close();
 ```
 
-Step reporting is optional — clients that pass `withStep` calls inside `withTurn` get granular audit events on the channel; clients that don't still work.
+The client negotiates WSS first; falls back to SSE transparently. Step reporting is optional — clients that omit `withStep` still work.
 
 ---
 
@@ -149,45 +136,49 @@ Step reporting is optional — clients that pass `withStep` calls inside `withTu
 
 | Failure | Mitigation |
 |---|---|
-| Client crashes mid-turn | Lease expires, server revokes turn and advances queue. Equivalent to WebSocket disconnect-detection but works for HTTP-only clients. |
-| Client crashes mid-queue | Position-update notification stops landing; client just hasn't subscribed anymore. Queue continues. Optional cleanup via TTL on enqueued positions. |
+| Client crashes mid-turn | WSS: disconnect detected immediately, turn advances. SSE: lease expires, server revokes and advances. |
+| Client crashes mid-queue | WSS: removed from queue on disconnect. SSE: position-update stops landing; queue continues. Optional TTL on enqueued positions. |
 | Work takes too long | Lease timeout fires, turn revoked, queue advances. Active step reporting acts as keepalive. |
-| Server restarts | Channel state is in-memory. Clients reconnect, observe via SSE `subscribe` to get current state, re-enqueue if needed. Optional disk persistence for v2. |
+| Server restarts | Channel state is in-memory. Clients reconnect and re-enqueue if needed. Optional disk persistence for v2. |
 | Two clients same clientId in same channel | `ALREADY_QUEUED` error returned to second. |
-| Server is SPOF | Run under supervisor (systemd, pm2). Health endpoint for monitoring. Client falls back after configurable timeout. Multi-instance HA is a v2 concern. |
+| Server is SPOF | Run under supervisor (systemd, pm2). Health endpoint for monitoring. Client reconnects automatically after configurable backoff. Multi-instance HA is a v2 concern. |
 
 ---
 
 ## Work atomicity (client responsibility)
 
-The server only guarantees turn ordering. The client's work inside `withTurn` is responsible for its own atomicity. Example: if a client gets `your-turn`, runs `git commit`, then crashes before `git push`, the repo is in a half-done state — the server can't recover that. The README spells this out so adopters don't assume transactional semantics they aren't getting.
+The server guarantees turn ordering only. Work inside `withTurn` is responsible for its own atomicity. If a client gets `your-turn`, runs `git commit`, then crashes before `git push`, the repo is half-done — the server cannot recover that. The README spells this out so adopters don't assume transactional semantics they aren't getting.
 
 ---
 
-## Integration target (near-term, drives v1.0)
+## Integration targets
 
-### Crosstalk (`cordfuse/crosstalk-runtime`)
+### Crosstalk (`cordfuse/crosstalk-runtime`) — v1.0 driver
 
-This is the entire v1.0 driver. `spkr` exists to solve Crosstalk's collision problem first; everything else is downstream.
+This is the entire v1.0 scope. `tokn` exists to solve Crosstalk's push collision problem.
 
 - Replace `pushWithRetry` shim in `src/git.ts`.
 - Replace per-remote push queue in `src/transports/git.ts`.
-- Agent startup: connect to `spkr`, create/join channels per transport remote.
+- Agent startup: connect to `tokn`, create/join channels per transport remote.
 - `commitAndPush` becomes `withTurn(remote, () => pull + commit + push)`.
 - Zero push rejections by design. Retry loop deleted entirely.
 
+### Politik (`cordfuse/politik`) — v1.1+
+
+Write serialization for chamber proceedings. Each chamber has a channel; agents take turns proposing, seconding, and voting. `tokn` enforces the speaking order. Channel-naming convention and step taxonomy need Politik architecture review before implementation.
+
 ---
 
-## Future use cases (not driving v1.0)
+## Client examples
 
-`spkr` is designed as a general-purpose FIFO coordination primitive. Beyond Crosstalk, candidate consumers exist — none of which shape current scope:
+Rather than maintaining official SDKs, ship one great TypeScript reference client and let other languages consume the protocol directly.
 
-- **Politik** — write serialization for the speaker pattern in governance proceedings. Will consume `spkr` when Politik's reference implementation begins (currently in PLAN phase per `~/Repos/STRATEGY.md`; not happening in `spkr`'s v1.0 timeframe).
-- **Deploy queues** — serializing production deploys across team members or environments.
-- **Migration runners** — ensuring database/schema migrations apply one at a time across a fleet.
-- **Bulk send coordination** — any process where multiple workers must serialize against a shared resource.
+- **`src/client.ts`** — canonical TypeScript client (`@cordfuse/tokn`, subpath `./client`). Bun-native, Node-compatible. WSS-first/SSE-fallback. Full test suite.
+- **`SPEC.md`** — protocol specification. State machine, sequence semantics, error recovery contracts, event schemas.
+- **`client-examples/curl/`** — raw HTTP + wscat. Demonstrates the protocol without language opinion.
+- **`client-examples/go/`** — idiomatic goroutines + channels. Natural fit for the DevOps audience.
 
-These are illustrative, not commitments. If you find yourself making protocol decisions to accommodate a future use case rather than Crosstalk, push back — the principle is that Crosstalk-shaped requirements drive v1.0 and everything else benefits from the resulting primitive.
+Community contributes additional languages via the same pattern.
 
 ---
 
@@ -195,38 +186,38 @@ These are illustrative, not commitments. If you find yourself making protocol de
 
 ### Phase 1 — Core package (week 1)
 
-- [ ] `src/server.ts` — `SpkrServer` class (create/delete/list channels, enqueue, release, lease/timeout).
-- [ ] `src/client.ts` — `SpkrClient` (`withTurn`, `createChannel`, `subscribe`, `observe`, reconnect).
-- [ ] `src/protocol.ts` — all message types and SSE event types as TypeScript interfaces.
-- [ ] `src/errors.ts` — `SpkrError` class + error codes.
-- [ ] Basic test suite (in-process Hono server, multiple clients, FIFO verification).
+- [ ] `src/server.ts` — `ToknServer` class (Express, create/delete/list channels, enqueue, release, lease/timeout, WSS + SSE on same endpoint).
+- [ ] `src/client.ts` — `ToknClient` (`withTurn`, `createChannel`, `subscribe`, `observe`, WSS-first/SSE-fallback, reconnect).
+- [ ] `src/protocol.ts` — all message types and event types as TypeScript interfaces.
+- [ ] `src/errors.ts` — `ToknError` class + error codes.
+- [ ] `package.json` subpath exports (`./server`, `./client`).
+- [ ] Basic test suite (in-process Express server, multiple clients, FIFO verification).
 - [ ] `SPEC.md` first draft.
 - [ ] `README.md` quick-start.
 
 ### Phase 2 — Hardening (week 2)
 
-- [ ] Integration tests (lease-expiry mid-turn, reconnect, observer subscription).
+- [ ] Integration tests (lease-expiry mid-turn, reconnect on SSE fallback, observer subscription).
 - [ ] Dev/prod stack-trace gating.
 - [ ] `requestId` correlation across requests.
 - [ ] Step reporting end-to-end.
-- [ ] Channel observer SSE stream.
-- [ ] `templates/systemd/spkr.service`.
-- [ ] `client-examples/curl/`, `client-examples/python/`, `client-examples/go/`.
+- [ ] Channel observer stream (WSS + SSE).
+- [ ] `templates/systemd/tokn.service`.
+- [ ] `client-examples/curl/`, `client-examples/go/`.
 
 ### Phase 3 — Crosstalk integration (week 3)
 
 - [ ] Replace `pushWithRetry` in `cordfuse/crosstalk-runtime`.
 - [ ] Remove jitter config (or deprecate).
-- [ ] Update `CROSSTALK.md` session-open step to use `spkr` coordination.
+- [ ] Update `CROSSTALK.md` session-open step to use `tokn` coordination.
 - [ ] Field validation: 5 peer agents, 0 push failures over a multi-hour session.
 
 ### Phase 4 — Publish (week 4)
 
 - [ ] Final SPEC.md, README.md polish.
-- [ ] `npm publish @cordfuse/spkr-server`.
-- [ ] `npm publish @cordfuse/spkr-client`.
+- [ ] `npm publish @cordfuse/tokn`.
 - [ ] GitHub release v1.0.0.
-- [ ] Announcement coordinated with Crosstalk's launch wave (target: post-STD-return, alongside the rest of the Cordfuse public push).
+- [ ] Announcement coordinated with Crosstalk's launch wave.
 
 ---
 
@@ -236,13 +227,13 @@ These are illustrative, not commitments. If you find yourself making protocol de
 - Admin auth for channel create/delete (v2 concern; v1 assumes trusted network).
 - What happens to queued clients when a channel is deleted — error out or drain first?
 - Multi-instance HA via leader election (v2 concern; v1 assumes single-instance with supervisor restart).
-- Politik's specific channel-naming convention and step taxonomy — needs Politik architecture review first.
-- OpenAPI spec generation from Hono routes (low-cost add-on after v1.0 if requested).
+- Politik's channel-naming convention and step taxonomy — needs Politik architecture review first.
+- OpenAPI spec (low-cost add-on after v1.0 if requested).
 
 ---
 
 ## Genesis
 
-Originated in Cortex dev session 2026-05-26 with dev team actors loaded. Source memory: `data/memories/20260528T035510.30Z-28a2f8303f2c3165.md` in `steve-krisjanovs/cortex`. Original codename was `turnstile`; renamed to `spkr` 2026-05-28 to match the parliamentary metaphor more directly and align with Cordfuse's vyzr-style respelling convention. Original protocol design specified WebSocket; revised to HTTP + SSE during the same design discussion.
+Originated in Cortex dev session 2026-05-26 with dev team actors loaded. Source memory: `data/memories/20260528T035510.30Z-28a2f8303f2c3165.md` in `steve-krisjanovs/cortex`. Original codename was `turnstile`; renamed to `spkr` then to `tokn` (2026-05-28) — `tokn` is a web3 respelling of "token," directly referencing the 1984 token ring pattern. Original protocol design specified WebSocket only; revised to WSS-first/SSE-fallback to cover enterprise environments. Server revised from Hono to Express for broader ecosystem compatibility.
 
-Insight: jitter answers *"is it free?"* — `spkr` answers *"when is it my turn?"* Pattern is analogous to the 1984 token ring, reimagined as a modern npm primitive.
+Insight: jitter answers *"is it free?"* — `tokn` answers *"when is it my turn?"*
