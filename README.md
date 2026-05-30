@@ -124,11 +124,13 @@ client.close();
 
 ## Running the server
 
-```sh
-docker run -e TURNQ_API_KEY=your-key -p 3003:3003 ghcr.io/cordfuse/turnq
-```
+Clone the repo and use docker compose:
 
-Or with docker compose from the repo — see `docker-compose.yml`.
+```sh
+git clone https://github.com/cordfuse/turnq
+cd turnq
+TURNQ_API_KEY=your-key docker compose up -d
+```
 
 ### Admin endpoints
 
