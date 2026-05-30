@@ -78,7 +78,6 @@ jobs:
           fi
 
       - name: Publish to npm
-        if: ${{ env.NPM_TOKEN != '' }}
         run: npm publish --access public --tag ${{ steps.npmtag.outputs.tag }}
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
