@@ -1,8 +1,8 @@
 import EventEmitter from 'events';
 import { randomUUID } from 'crypto';
 import { WebSocket } from 'ws';
-import { ToknError } from './errors.ts';
-import type { ChannelInfo } from './protocol.ts';
+import { ToknError } from './errors.js';
+import type { ChannelInfo } from './protocol.js';
 
 export interface ToknClientOptions {
   apiKey?: string;
@@ -95,12 +95,12 @@ export class ToknClient extends EventEmitter {
     return body.channels;
   }
 
-  async withTurn(
+  async withTurn<T = void>(
     channel: string,
-    fn: (ctx: TurnContext) => Promise<void>,
+    fn: (ctx: TurnContext) => Promise<T>,
     clientId?: string,
     opts?: WithTurnOptions,
-  ): Promise<void> {
+  ): Promise<T> {
     const cid = clientId ?? randomUUID();
 
     const enqRes = await this.fetch(`/channels/${channel}/enqueue`, {
@@ -114,22 +114,22 @@ export class ToknClient extends EventEmitter {
     }
     const { requestId } = await enqRes.json();
 
-    await this.runWithReconnect(channel, cid, requestId, fn, opts);
+    return this.runWithReconnect(channel, cid, requestId, fn, opts);
   }
 
-  private async runWithReconnect(
+  private async runWithReconnect<T>(
     channel: string,
     clientId: string,
     requestId: string,
-    fn: (ctx: TurnContext) => Promise<void>,
+    fn: (ctx: TurnContext) => Promise<T>,
     opts?: WithTurnOptions,
-  ): Promise<void> {
+  ): Promise<T> {
     const maxAttempts = this.opts.maxReconnectAttempts ?? 5;
     let attempt = 0;
 
     while (true) {
       try {
-        return await this.runWithSubscription(channel, clientId, requestId, fn);
+        return await this.runWithSubscription<T>(channel, clientId, requestId, fn);
       } catch (err) {
         // protocol errors (lease expired, not your turn, etc.) — don't retry
         if (err instanceof ToknError) throw err;
@@ -143,12 +143,12 @@ export class ToknClient extends EventEmitter {
     }
   }
 
-  private async runWithSubscription(
+  private async runWithSubscription<T>(
     channel: string,
     clientId: string,
     requestId: string,
-    fn: (ctx: TurnContext) => Promise<void>,
-  ): Promise<void> {
+    fn: (ctx: TurnContext) => Promise<T>,
+  ): Promise<T> {
     const wsBase = this.baseUrl.replace(/^http/, 'ws');
     const apiKeyParam = this.opts.apiKey ? `&apiKey=${encodeURIComponent(this.opts.apiKey)}` : '';
     const wsUrl = `${wsBase}/channels/${channel}/subscribe?clientId=${clientId}&requestId=${requestId}${apiKeyParam}`;
@@ -156,23 +156,23 @@ export class ToknClient extends EventEmitter {
     if (!this.opts.preferSse) {
       try {
         const ws = await connectWss(wsUrl, this.headers);
-        return await this.runWs(ws, channel, clientId, requestId, fn);
+        return await this.runWs<T>(ws, channel, clientId, requestId, fn);
       } catch {
         // fall through to SSE
       }
     }
 
-    return await this.runSse(channel, clientId, requestId, fn);
+    return await this.runSse<T>(channel, clientId, requestId, fn);
   }
 
-  private async runWs(
+  private async runWs<T>(
     ws: WebSocket,
     channel: string,
     clientId: string,
     requestId: string,
-    fn: (ctx: TurnContext) => Promise<void>,
-  ): Promise<void> {
-    return new Promise((resolve, reject) => {
+    fn: (ctx: TurnContext) => Promise<T>,
+  ): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
       ws.on('message', async (raw) => {
         let msg: { event: string; data: unknown };
         try { msg = JSON.parse(raw.toString()); } catch { return; }
@@ -181,10 +181,10 @@ export class ToknClient extends EventEmitter {
           ws.removeAllListeners('message');
           ws.removeAllListeners('error');
           try {
-            await fn(this.makeTurnContext(channel, clientId));
+            const result = await fn(this.makeTurnContext(channel, clientId));
             await this.release(channel, clientId, requestId, true);
             ws.close();
-            resolve();
+            resolve(result);
           } catch (err: unknown) {
             const m = err instanceof Error ? err.message : String(err);
             await this.release(channel, clientId, requestId, false, m).catch(() => {});
@@ -208,12 +208,12 @@ export class ToknClient extends EventEmitter {
     });
   }
 
-  private async runSse(
+  private async runSse<T>(
     channel: string,
     clientId: string,
     requestId: string,
-    fn: (ctx: TurnContext) => Promise<void>,
-  ): Promise<void> {
+    fn: (ctx: TurnContext) => Promise<T>,
+  ): Promise<T> {
     const apiKeyParam = this.opts.apiKey ? `&apiKey=${encodeURIComponent(this.opts.apiKey)}` : '';
     const url = `${this.baseUrl}/channels/${channel}/subscribe?clientId=${clientId}&requestId=${requestId}${apiKeyParam}`;
     const res = await fetch(url, { headers: this.headers });
@@ -222,9 +222,9 @@ export class ToknClient extends EventEmitter {
     for await (const { event, data } of parseSse(res.body as ReadableStream<Uint8Array>)) {
       if (event === 'your-turn') {
         try {
-          await fn(this.makeTurnContext(channel, clientId));
+          const result = await fn(this.makeTurnContext(channel, clientId));
           await this.release(channel, clientId, requestId, true);
-          return;
+          return result;
         } catch (err: unknown) {
           const m = err instanceof Error ? err.message : String(err);
           await this.release(channel, clientId, requestId, false, m).catch(() => {});
@@ -237,6 +237,7 @@ export class ToknClient extends EventEmitter {
         throw new Error('server_shutdown');
       }
     }
+    throw new Error('SSE stream ended before your-turn');
   }
 
   private makeTurnContext(channel: string, clientId: string): TurnContext {

@@ -6,20 +6,26 @@
   "exports": {
     ".": "./src/index.ts",
     "./server": "./src/server.ts",
-    "./client": "./src/client.ts"
+    "./client": {
+      "bun": "./src/client.ts",
+      "import": "./dist/client.js",
+      "types": "./dist/client.d.ts"
+    }
   },
   "scripts": {
     "start": "bun run src/main.ts",
     "dev": "bun --watch src/main.ts",
+    "build": "tsc -p tsconfig.build.json",
     "test": "bun test"
-  },
-  "dependencies": {
-    "express": "^4.19.2",
-    "ws": "^8.17.1"
   },
   "devDependencies": {
     "@types/express": "^4.17.21",
     "@types/ws": "^8.5.12",
-    "bun-types": "latest"
+    "bun-types": "latest",
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "ws": "^8.17.1"
   }
 }
