@@ -86,13 +86,13 @@ class Histogram {
 }
 
 export const metrics = {
-  requestsTotal:    new Counter('tokn_requests_total',          'Total HTTP requests by method, path, and status'),
-  activeChannels:   new Gauge('tokn_active_channels',           'Number of active channels'),
-  queueDepth:       new Gauge('tokn_queue_depth',               'Current queue depth per channel'),
-  activeConns:      new Gauge('tokn_active_connections',        'Active subscriber connections by transport type'),
-  waitDuration:     new Histogram('tokn_wait_duration_seconds', 'Time from enqueue to turn grant per channel'),
-  holdDuration:     new Histogram('tokn_hold_duration_seconds', 'Time from turn grant to release or expiry per channel'),
-  timeoutsTotal:    new Counter('tokn_timeouts_total',          'Total timeouts by channel and reason'),
+  requestsTotal:    new Counter('turnq_requests_total',          'Total HTTP requests by method, path, and status'),
+  activeChannels:   new Gauge('turnq_active_channels',           'Number of active channels'),
+  queueDepth:       new Gauge('turnq_queue_depth',               'Current queue depth per channel'),
+  activeConns:      new Gauge('turnq_active_connections',        'Active subscriber connections by transport type'),
+  waitDuration:     new Histogram('turnq_wait_duration_seconds', 'Time from enqueue to turn grant per channel'),
+  holdDuration:     new Histogram('turnq_hold_duration_seconds', 'Time from turn grant to release or expiry per channel'),
+  timeoutsTotal:    new Counter('turnq_timeouts_total',          'Total timeouts by channel and reason'),
 
   expose(): string {
     return [

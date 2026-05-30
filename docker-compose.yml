@@ -1,11 +1,11 @@
 services:
-  tokn:
+  turnq:
     build: .
-    container_name: tokn
+    container_name: turnq
     ports:
       - "3003:3003"
     environment:
-      - TOKN_API_KEY=${TOKN_API_KEY}
+      - TURNQ_API_KEY=${TURNQ_API_KEY}
       - PORT=3003
     restart: unless-stopped
     healthcheck:

@@ -367,8 +367,8 @@ describe('metrics', () => {
     const res = await fetch(`${BASE}/metrics`, authed());
     expect(res.status).toBe(200);
     const text = await res.text();
-    expect(text).toContain('tokn_requests_total');
-    expect(text).toContain('tokn_active_channels');
+    expect(text).toContain('turnq_requests_total');
+    expect(text).toContain('turnq_active_channels');
   });
 
   it('GET /metrics without key → 401', async () => {

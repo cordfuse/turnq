@@ -4,7 +4,7 @@ import { spawn } from 'child_process';
 import { ToknClient } from '../src/client.ts';
 
 const WORKERS   = 20;
-const TOKN_URL  = 'http://localhost:3003';
+const TURNQ_URL  = 'http://localhost:3003';
 const API_KEY   = 'test-smoke';
 const CHANNEL   = 'bench:push';
 const JITTER_MS = 1_000;  // matches real Crosstalk default
@@ -76,7 +76,7 @@ async function runJitter(clones: string[]): Promise<{ ms: number; retries: numbe
   return { ms: Date.now() - start, retries: totalRetries };
 }
 
-async function runTokn(clones: string[], client: ToknClient): Promise<{ ms: number }> {
+async function runTurnq(clones: string[], client: ToknClient): Promise<{ ms: number }> {
   const start = Date.now();
 
   await Promise.all(clones.map(async (dir, i) => {
@@ -98,7 +98,7 @@ async function runTokn(clones: string[], client: ToknClient): Promise<{ ms: numb
 process.stdout.write(`setting up repos for ${WORKERS} workers...\n`);
 const [jitterSetup, toknSetup] = await Promise.all([
   makeSetup('jitter'),
-  makeSetup('tokn'),
+  makeSetup('turnq'))
 ]);
 process.stdout.write(`setup done\n\n`);
 
@@ -106,21 +106,21 @@ process.stdout.write(`--- JITTER (max ${JITTER_MS}ms per retry) ---\n`);
 const jitter = await runJitter(jitterSetup.clones);
 process.stdout.write(`done: ${(jitter.ms / 1000).toFixed(2)}s — ${jitter.retries} retries\n\n`);
 
-const client = new ToknClient(TOKN_URL, { apiKey: API_KEY });
+const client = new ToknClient(TURNQ_URL, { apiKey: API_KEY });
 await client.createChannel(CHANNEL, { leaseMs: 60_000 });
 
-process.stdout.write(`--- TOKN ---\n`);
-const tokn = await runTokn(toknSetup.clones, client);
-process.stdout.write(`done: ${(tokn.ms / 1000).toFixed(2)}s — 0 retries\n\n`);
+process.stdout.write(`--- TURNQ ---\n`);
+const turnq = await runTurnq(turnqSetup.clones, client);
+process.stdout.write(`done: ${(turnq.ms / 1000).toFixed(2)}s — 0 retries\n\n`);
 
 client.close();
 await Promise.all([
   rm(jitterSetup.base, { recursive: true, force: true }),
-  rm(toknSetup.base,   { recursive: true, force: true }),
+  rm(turnqSetup.base,   { recursive: true, force: true }),
 ]);
 
-const speedup = jitter.ms / tokn.ms;
+const speedup = jitter.ms / turnq.ms;
 process.stdout.write(`=== RESULT ===\n`);
 process.stdout.write(`jitter : ${(jitter.ms / 1000).toFixed(2)}s  (${jitter.retries} retries, ${JITTER_MS}ms max jitter)\n`);
-process.stdout.write(`tokn   : ${(tokn.ms / 1000).toFixed(2)}s  (0 retries)\n`);
+process.stdout.write(`turnq  : ${(turnq.ms / 1000).toFixed(2)}s  (0 retries)\n`);
 process.stdout.write(`speedup: ${speedup.toFixed(2)}x\n`);

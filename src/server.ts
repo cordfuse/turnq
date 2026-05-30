@@ -621,7 +621,7 @@ export class ToknServer {
     const p = port ?? this.opts.port ?? 3000;
     return new Promise((resolve) => {
       this.httpServer.listen(p, () => {
-        logger.info('tokn listening', { port: p });
+        logger.info('turnq listening', { port: p });
         resolve();
       });
     });

@@ -2,12 +2,12 @@ import { ToknServer } from './server.ts';
 import { Persistence } from './persist.ts';
 import { logger } from './logger.ts';
 
-const apiKey = process.env.TOKN_API_KEY;
+const apiKey = process.env.TURNQ_API_KEY;
 const port   = parseInt(process.env.PORT ?? '3000', 10);
 const persistPath = process.env.PERSIST_PATH;
 
 if (!apiKey) {
-  logger.error('TOKN_API_KEY env var required');
+  logger.error('TURNQ_API_KEY env var required');
   process.exit(1);
 }
 

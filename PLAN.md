@@ -1,4 +1,4 @@
-# tokn — Plan
+# turnq — Plan
 
 Pronounced "token." A standalone npm package implementing a **named-channel turn coordinator**. Clients connect, join a named channel queue, receive a "your turn" signal, run any arbitrary work locally, report success or failure, and release. The server is resource-agnostic — it knows nothing about git, deploys, or any specific operation.
 
@@ -13,16 +13,16 @@ Built to replace jitter-based push retry in Crosstalk. Generalizes to any FIFO s
 
 Two metaphors compose, and the name captures both:
 
-- **Token ring (1984)** — only the node holding the token may transmit. `tokn` is the token: it circulates deterministically, one holder at a time.
-- **Hub-and-spoke** — `tokn` is the hub. Clients are spokes. The hub decides which spoke holds the token next.
+- **Token ring (1984)** — only the node holding the token may transmit. `turnq` is the token: it circulates deterministically, one holder at a time.
+- **Hub-and-spoke** — `turnq` is the hub. Clients are spokes. The hub decides which spoke holds the token next.
 
-The framing: jitter answers *"is it free?"* — `tokn` answers *"when is it my turn?"*
+The framing: jitter answers *"is it free?"* — `turnq` answers *"when is it my turn?"*
 
 ---
 
 ## Why it matters
 
-- Jitter is probabilistic. `tokn` is deterministic.
+- Jitter is probabilistic. `turnq` is deterministic.
 - First genuine FIFO cross-process/cross-machine turn coordination as a tiny npm primitive.
 - No Redis, no BullMQ, no infrastructure beyond one Node/Bun process.
 - Generalizes beyond git: deploys, migrations, bulk sends, any serialized operation.
@@ -35,11 +35,11 @@ The framing: jitter answers *"is it free?"* — `tokn` answers *"when is it my t
 One package, two subpath exports. Server and client share protocol types at root.
 
 ```
-@cordfuse/tokn
+@cordfuse/turnq
   imports:
-    '@cordfuse/tokn'          → { ToknServer, ToknClient, ...protocol types }
-    '@cordfuse/tokn/server'   → { ToknServer }
-    '@cordfuse/tokn/client'   → { ToknClient }
+    '@cordfuse/turnq'          → { TurnqServer, TurnqClient, ...protocol types }
+    '@cordfuse/turnq/server'   → { TurnqServer }
+    '@cordfuse/turnq/client'   → { TurnqClient }
 ```
 
 Single package means one version to pin, one changelog, shared protocol types that can't drift between server and client.
@@ -74,21 +74,21 @@ The key is an env var on both sides:
 
 ```
 # server
-TOKN_API_KEY=...
+TURNQ_API_KEY=...
 
 # client
-TOKN_API_KEY=...
+TURNQ_API_KEY=...
 ```
 
-Auth is injected as middleware on `ToknServer`, not hardcoded. The default implementation checks `X-Api-Key`. Callers can replace it entirely:
+Auth is injected as middleware on `TurnqServer`, not hardcoded. The default implementation checks `X-Api-Key`. Callers can replace it entirely:
 
 ```ts
-const server = new ToknServer({
-  auth: (req) => req.headers['x-api-key'] === process.env.TOKN_API_KEY,
+const server = new TurnqServer({
+  auth: (req) => req.headers['x-api-key'] === process.env.TURNQ_API_KEY,
 });
 
-const client = new ToknClient('https://tokn.example.com', {
-  apiKey: process.env.TOKN_API_KEY,
+const client = new TurnqClient('https://turnq.example.com', {
+  apiKey: process.env.TURNQ_API_KEY,
 });
 ```
 
@@ -117,7 +117,7 @@ render.yaml         — Render service definition (web service, health check, en
 
 Render specifics:
 - `PORT` env var injected by Render; server binds to `process.env.PORT || 3000`
-- `TOKN_API_KEY` set in Render dashboard (not committed)
+- `TURNQ_API_KEY` set in Render dashboard (not committed)
 - Auto-deploy on push to `main`
 - HTTPS termination handled by Render — server speaks plain HTTP internally
 
@@ -129,14 +129,14 @@ GET /health   → 200 { ok: true }
 
 Crosstalk agents connect to the Render-hosted URL. Zero ops: Render handles uptime, restarts, TLS.
 
-**Local dev:** `tokn.linux.internal` resolves to cachy's IPv4. Use this in `docker-compose.yml` for local testing before pushing to Render. The `TOKN_URL` env var swaps between environments:
+**Local dev:** `turnq.linux.internal` resolves to cachy's IPv4. Use this in `docker-compose.yml` for local testing before pushing to Render. The `TURNQ_URL` env var swaps between environments:
 
 ```
 # local (.env)
-TOKN_URL=http://tokn.linux.internal:3000
+TURNQ_URL=http://turnq.linux.internal:3000
 
 # render (set in dashboard)
-TOKN_URL=https://tokn.onrender.com
+TURNQ_URL=https://turnq.onrender.com
 ```
 
 ---
@@ -193,9 +193,9 @@ INTERNAL_ERROR
 ## Client API (ergonomic surface)
 
 ```typescript
-import { ToknClient } from '@cordfuse/tokn/client';
+import { TurnqClient } from '@cordfuse/turnq/client';
 
-const client = new ToknClient('https://tokn.example.com');
+const client = new TurnqClient('https://turnq.example.com');
 
 await client.createChannel('git-push-main', { leaseMs: 60_000 });
 
@@ -236,17 +236,17 @@ The server guarantees turn ordering only. Work inside `withTurn` is responsible 
 
 ### Crosstalk (`cordfuse/crosstalk-runtime`) — v1.0 driver
 
-This is the entire v1.0 scope. `tokn` exists to solve Crosstalk's push collision problem.
+This is the entire v1.0 scope. `turnq` exists to solve Crosstalk's push collision problem.
 
 - Replace `pushWithRetry` shim in `src/git.ts`.
 - Replace per-remote push queue in `src/transports/git.ts`.
-- Agent startup: connect to `tokn`, create/join channels per transport remote.
+- Agent startup: connect to `turnq`, create/join channels per transport remote.
 - `commitAndPush` becomes `withTurn(remote, () => pull + commit + push)`.
 - Zero push rejections by design. Retry loop deleted entirely.
 
 ### Politik (`cordfuse/politik`) — v1.1+
 
-Write serialization for chamber proceedings. Each chamber has a channel; agents take turns proposing, seconding, and voting. `tokn` enforces the speaking order. Channel-naming convention and step taxonomy need Politik architecture review before implementation.
+Write serialization for chamber proceedings. Each chamber has a channel; agents take turns proposing, seconding, and voting. `turnq` enforces the speaking order. Channel-naming convention and step taxonomy need Politik architecture review before implementation.
 
 ---
 
@@ -254,7 +254,7 @@ Write serialization for chamber proceedings. Each chamber has a channel; agents 
 
 Rather than maintaining official SDKs, ship one great TypeScript reference client and let other languages consume the protocol directly.
 
-- **`src/client.ts`** — canonical TypeScript client (`@cordfuse/tokn`, subpath `./client`). Bun-native, Node-compatible. WSS-first/SSE-fallback. Full test suite.
+- **`src/client.ts`** — canonical TypeScript client (`@cordfuse/turnq`, subpath `./client`). Bun-native, Node-compatible. WSS-first/SSE-fallback. Full test suite.
 - **`SPEC.md`** — protocol specification. State machine, sequence semantics, error recovery contracts, event schemas.
 - **`client-examples/curl/`** — raw HTTP + wscat. Demonstrates the protocol without language opinion.
 - **`client-examples/go/`** — idiomatic goroutines + channels. Natural fit for the DevOps audience.
@@ -267,13 +267,13 @@ Community contributes additional languages via the same pattern.
 
 ### Phase 1 — Core package (week 1)
 
-- [x] `src/server.ts` — `ToknServer` class (Express, create/delete/list channels, enqueue, release, lease/timeout, WSS + SSE on same endpoint, auth middleware, `GET /health`).
-- [x] `src/client.ts` — `ToknClient` (`withTurn`, `createChannel`, `subscribe`, `observe`, WSS-first/SSE-fallback, reconnect, `X-Api-Key` on every request).
+- [x] `src/server.ts` — `TurnqServer` class (Express, create/delete/list channels, enqueue, release, lease/timeout, WSS + SSE on same endpoint, auth middleware, `GET /health`).
+- [x] `src/client.ts` — `TurnqClient` (`withTurn`, `createChannel`, `subscribe`, `observe`, WSS-first/SSE-fallback, reconnect, `X-Api-Key` on every request).
 - [x] `src/protocol.ts` — all message types and event types as TypeScript interfaces.
-- [x] `src/errors.ts` — `ToknError` class + error codes.
+- [x] `src/errors.ts` — `TurnqError` class + error codes.
 - [x] `package.json` subpath exports (`./server`, `./client`).
 - [x] `Dockerfile` — `oven/bun` base, binds to `PORT` env var.
-- [x] `render.yaml` — Render web service definition, health check on `/health`, `TOKN_API_KEY` env var declaration.
+- [x] `render.yaml` — Render web service definition, health check on `/health`, `TURNQ_API_KEY` env var declaration.
 - [x] Basic test suite (in-process Express server, multiple clients, FIFO verification). 18/18 pass.
 - [ ] `SPEC.md` first draft.
 - [x] `README.md` quick-start.
@@ -289,15 +289,15 @@ Community contributes additional languages via the same pattern.
 
 ### Phase 3 — Crosstalk integration (week 3)
 
-- [x] Replace `pushWithRetry` in `cordfuse/crosstalk-runtime` — `feat/tokn-integration` branch.
-- [x] Remove jitter config (or deprecate) — jitter kept as fallback, tokn is opt-in via config.
-- [ ] Update `CROSSTALK.md` session-open step to use `tokn` coordination.
+- [x] Replace `pushWithRetry` in `cordfuse/crosstalk-runtime` — `feat/turnq-integration` branch.
+- [x] Remove jitter config (or deprecate) — jitter kept as fallback, turnq is opt-in via config.
+- [ ] Update `CROSSTALK.md` session-open step to use `turnq` coordination.
 - [ ] Field validation: 5 peer agents, 0 push failures over a multi-hour session.
 
 ### Phase 4 — Publish (week 4)
 
 - [ ] Final SPEC.md, README.md polish.
-- [ ] `npm publish @cordfuse/tokn`.
+- [ ] `npm publish @cordfuse/turnq`.
 - [ ] GitHub release v1.0.0.
 - [ ] Announcement coordinated with Crosstalk's launch wave.
 
@@ -316,6 +316,6 @@ Community contributes additional languages via the same pattern.
 
 ## Genesis
 
-Originated in Cortex dev session 2026-05-26 with dev team actors loaded. Source memory: `data/memories/20260528T035510.30Z-28a2f8303f2c3165.md` in `steve-krisjanovs/cortex`. Original codename was `turnstile`; renamed to `spkr` then to `tokn` (2026-05-28) — `tokn` is a web3 respelling of "token," directly referencing the 1984 token ring pattern. Original protocol design specified WebSocket only; revised to WSS-first/SSE-fallback to cover enterprise environments. Server revised from Hono to Express for broader ecosystem compatibility.
+Originated in Cortex dev session 2026-05-26 with dev team actors loaded. Source memory: `data/memories/20260528T035510.30Z-28a2f8303f2c3165.md` in `steve-krisjanovs/cortex`. Original codename was `turnstile`; renamed to `spkr` then to `turnq` (2026-05-28) — `turnq` is a web3 respelling of "token," directly referencing the 1984 token ring pattern. Original protocol design specified WebSocket only; revised to WSS-first/SSE-fallback to cover enterprise environments. Server revised from Hono to Express for broader ecosystem compatibility.
 
-Insight: jitter answers *"is it free?"* — `tokn` answers *"when is it my turn?"*
+Insight: jitter answers *"is it free?"* — `turnq` answers *"when is it my turn?"*

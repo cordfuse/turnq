@@ -1,5 +1,5 @@
 {
-  "name": "@cordfuse/tokn",
+  "name": "@cordfuse/turnq",
   "version": "0.2.0",
   "description": "Named-channel turn coordinator. WSS-first, SSE-fallback.",
   "type": "module",

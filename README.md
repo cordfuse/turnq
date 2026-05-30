@@ -1,8 +1,8 @@
-# tokn
+# turnq
 
 When multiple processes need exclusive access to a shared resource — a git branch, a deploy slot, a database migration — the naive fix is retry with jitter: wait a random amount of time, try again, hope for the best. It works until it doesn't. Under load, agents collide repeatedly, waste work they've already done, and latency becomes unpredictable. There's no ordering guarantee, no way to know your position, and no upper bound on how long you might wait.
 
-tokn replaces that gamble with a queue. Clients enqueue on a named channel, receive their turn when they're at the front, do their work, and release. Exactly one client holds the token at a time. Order is strict FIFO. No retries, no conflicts, no tuning magic numbers.
+turnq replaces that gamble with a queue. Clients enqueue on a named channel, receive their turn when they're at the front, do their work, and release. Exactly one client holds the token at a time. Order is strict FIFO. No retries, no conflicts, no tuning magic numbers.
 
 Pronounced "token." The server is resource-agnostic — it knows nothing about git, deploys, or any specific operation. It just enforces turns.
 
@@ -12,11 +12,11 @@ Pronounced "token." The server is resource-agnostic — it knows nothing about g
 
 ## In one sentence
 
-Jitter answers *"is it free?"* — tokn answers *"when is it my turn?"*
+Jitter answers *"is it free?"* — turnq answers *"when is it my turn?"*
 
 ## The metaphor
 
-Token ring (1984): only the node holding the token may transmit. `tokn` is the token — it circulates deterministically, one holder at a time, through a hub-and-spoke topology. The hub decides who's next. Spokes wait their turn.
+Token ring (1984): only the node holding the token may transmit. `turnq` is the token — it circulates deterministically, one holder at a time, through a hub-and-spoke topology. The hub decides who's next. Spokes wait their turn.
 
 ---
 
@@ -40,10 +40,10 @@ The turn lifecycle: **enqueue → subscribe → wait for `your-turn` → do work
 ## TypeScript (canonical client)
 
 ```typescript
-import { ToknClient } from '@cordfuse/tokn/client';
+import { TurnqClient } from '@cordfuse/turnq/client';
 
-const client = new ToknClient('https://tokn.example.com', {
-  apiKey: process.env.TOKN_API_KEY,
+const client = new TurnqClient('https://turnq.example.com', {
+  apiKey: process.env.TURNQ_API_KEY,
 });
 
 await client.createChannel('my-channel', { leaseMs: 60_000 });
@@ -62,27 +62,27 @@ client.close();
 ## bash + curl
 
 ```bash
-TOKN_URL="https://tokn.example.com"
+TURNQ_URL="https://turnq.example.com"
 CHANNEL="my-channel"
 CLIENT_ID=$(uuidgen)
 
 # Enqueue
-REQUEST_ID=$(curl -s -X POST "$TOKN_URL/channels/$CHANNEL/enqueue" \
-  -H "x-api-key: $TOKN_API_KEY" \
+REQUEST_ID=$(curl -s -X POST "$TURNQ_URL/channels/$CHANNEL/enqueue" \
+  -H "x-api-key: $TURNQ_API_KEY" \
   -H "content-type: application/json" \
   -d "{\"clientId\":\"$CLIENT_ID\"}" | jq -r .requestId)
 
 # Subscribe — wait for your-turn
-curl -sN "$TOKN_URL/channels/$CHANNEL/subscribe?clientId=$CLIENT_ID&requestId=$REQUEST_ID" \
-  -H "x-api-key: $TOKN_API_KEY" | while IFS= read -r line; do
+curl -sN "$TURNQ_URL/channels/$CHANNEL/subscribe?clientId=$CLIENT_ID&requestId=$REQUEST_ID" \
+  -H "x-api-key: $TURNQ_API_KEY" | while IFS= read -r line; do
   [[ "$line" == "event: your-turn" ]] || continue
 
   # Do work
   do_work
 
   # Release
-  curl -s -X POST "$TOKN_URL/channels/$CHANNEL/release" \
-    -H "x-api-key: $TOKN_API_KEY" \
+  curl -s -X POST "$TURNQ_URL/channels/$CHANNEL/release" \
+    -H "x-api-key: $TURNQ_API_KEY" \
     -H "content-type: application/json" \
     -d "{\"clientId\":\"$CLIENT_ID\",\"requestId\":\"$REQUEST_ID\"}"
   break
@@ -160,9 +160,9 @@ import java.net.http.*;
 import java.net.URI;
 import java.util.UUID;
 
-var toknUrl  = "https://tokn.example.com";
+var turnqUrl  = "https://turnq.example.com";
 var channel  = "my-channel";
-var apiKey   = System.getenv("TOKN_API_KEY");
+var apiKey   = System.getenv("TURNQ_API_KEY");
 var clientId = UUID.randomUUID().toString();
 var http     = HttpClient.newHttpClient();
 
@@ -170,7 +170,7 @@ var http     = HttpClient.newHttpClient();
 var enqResp = http.send(
     HttpRequest.newBuilder()
         .POST(HttpRequest.BodyPublishers.ofString("{\"clientId\":\"" + clientId + "\"}"))
-        .uri(URI.create(toknUrl + "/channels/" + channel + "/enqueue"))
+        .uri(URI.create(turnqUrl + "/channels/" + channel + "/enqueue"))
         .header("x-api-key", apiKey).header("content-type", "application/json")
         .build(),
     HttpResponse.BodyHandlers.ofString());
@@ -180,7 +180,7 @@ var requestId = parseRequestId(enqResp.body()); // extract from JSON
 var sseResp = http.send(
     HttpRequest.newBuilder()
         .GET()
-        .uri(URI.create(toknUrl + "/channels/" + channel +
+        .uri(URI.create(turnqUrl + "/channels/" + channel +
             "/subscribe?clientId=" + clientId + "&requestId=" + requestId))
         .header("x-api-key", apiKey)
         .build(),
@@ -200,7 +200,7 @@ http.send(
     HttpRequest.newBuilder()
         .POST(HttpRequest.BodyPublishers.ofString(
             "{\"clientId\":\"" + clientId + "\",\"requestId\":\"" + requestId + "\"}"))
-        .uri(URI.create(toknUrl + "/channels/" + channel + "/release"))
+        .uri(URI.create(turnqUrl + "/channels/" + channel + "/release"))
         .header("x-api-key", apiKey).header("content-type", "application/json")
         .build(),
     HttpResponse.BodyHandlers.discarding());
@@ -215,22 +215,22 @@ using System.Net.Http;
 using System.Text;
 using System.Text.Json;
 
-var toknUrl  = "https://tokn.example.com";
+var turnqUrl  = "https://turnq.example.com";
 var channel  = "my-channel";
 var clientId = Guid.NewGuid().ToString();
 var http     = new HttpClient();
-http.DefaultRequestHeaders.Add("x-api-key", Environment.GetEnvironmentVariable("TOKN_API_KEY"));
+http.DefaultRequestHeaders.Add("x-api-key", Environment.GetEnvironmentVariable("TURNQ_API_KEY"));
 
 // Enqueue
 var enqRes = await http.PostAsync(
-    $"{toknUrl}/channels/{channel}/enqueue",
+    $"{turnqUrl}/channels/{channel}/enqueue",
     new StringContent($$"""{"clientId":"{{clientId}}"}""", Encoding.UTF8, "application/json"));
 var enqJson   = JsonDocument.Parse(await enqRes.Content.ReadAsStringAsync());
 var requestId = enqJson.RootElement.GetProperty("requestId").GetString()!;
 
 // Subscribe (SSE)
 using var stream = await http.GetStreamAsync(
-    $"{toknUrl}/channels/{channel}/subscribe?clientId={clientId}&requestId={requestId}");
+    $"{turnqUrl}/channels/{channel}/subscribe?clientId={clientId}&requestId={requestId}");
 using var reader = new StreamReader(stream);
 
 string currentEvent = "", line;
@@ -244,7 +244,7 @@ await DoWorkAsync();
 
 // Release
 await http.PostAsync(
-    $"{toknUrl}/channels/{channel}/release",
+    $"{turnqUrl}/channels/{channel}/release",
     new StringContent($$"""{"clientId":"{{clientId}}","requestId":"{{requestId}}"}""",
         Encoding.UTF8, "application/json"));
 ```
@@ -308,19 +308,19 @@ where
 ## PowerShell
 
 ```powershell
-$ToknUrl  = "https://tokn.example.com"
+$TurnqUrl  = "https://turnq.example.com"
 $Channel  = "my-channel"
 $ClientId = [System.Guid]::NewGuid().ToString()
-$Headers  = @{ "x-api-key" = $env:TOKN_API_KEY; "Content-Type" = "application/json" }
+$Headers  = @{ "x-api-key" = $env:TURNQ_API_KEY; "Content-Type" = "application/json" }
 
 # Enqueue
-$Enq       = Invoke-RestMethod -Method POST -Uri "$ToknUrl/channels/$Channel/enqueue" `
+$Enq       = Invoke-RestMethod -Method POST -Uri "$TurnqUrl/channels/$Channel/enqueue" `
                -Headers $Headers -Body (ConvertTo-Json @{ clientId = $ClientId })
 $RequestId = $Enq.requestId
 
 # Subscribe (SSE) — read until your-turn
-$Req    = [System.Net.WebRequest]::Create("$ToknUrl/channels/$Channel/subscribe?clientId=$ClientId&requestId=$RequestId")
-$Req.Headers["x-api-key"] = $env:TOKN_API_KEY
+$Req    = [System.Net.WebRequest]::Create("$TurnqUrl/channels/$Channel/subscribe?clientId=$ClientId&requestId=$RequestId")
+$Req.Headers["x-api-key"] = $env:TURNQ_API_KEY
 $Stream = $Req.GetResponse().GetResponseStream()
 $Reader = New-Object System.IO.StreamReader($Stream)
 
@@ -336,7 +336,7 @@ $Reader.Close()
 Invoke-YourWork
 
 # Release
-Invoke-RestMethod -Method POST -Uri "$ToknUrl/channels/$Channel/release" `
+Invoke-RestMethod -Method POST -Uri "$TurnqUrl/channels/$Channel/release" `
     -Headers $Headers `
     -Body (ConvertTo-Json @{ clientId = $ClientId; requestId = $RequestId })
 ```

@@ -1,11 +1,11 @@
 import { ToknClient } from '../src/client.ts';
 
-const TOKN_URL = 'http://localhost:3003';
+const TURNQ_URL = 'http://localhost:3003';
 const API_KEY  = 'test-smoke';
 const CHANNEL  = 'smoke-test';
 const N        = 10;
 
-const client = new ToknClient(TOKN_URL, { apiKey: API_KEY });
+const client = new ToknClient(TURNQ_URL, { apiKey: API_KEY });
 await client.createChannel(CHANNEL, { leaseMs: 30_000 });
 
 const order: number[] = [];
