@@ -1,6 +1,6 @@
 {
   "name": "@cordfuse/turnq",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Named-channel turn coordinator. WSS-first, SSE-fallback.",
   "type": "module",
   "exports": {
@@ -20,6 +20,17 @@
       "bun": "./src/coordinator.ts"
     }
   },
+  "files": [
+    "dist",
+    "src/client.ts",
+    "src/errors.ts",
+    "src/protocol.ts",
+    "src/local.ts",
+    "src/coordinator.ts",
+    "types",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "start": "bun run src/main.ts",
     "dev": "bun --watch src/main.ts",
