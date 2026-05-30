@@ -1,6 +1,8 @@
 # turnq
 
-Named-channel turn coordinator. Exactly one client holds the token at a time. Order is strict FIFO.
+When multiple agents or processes write to a shared resource concurrently — a git branch, a deploy slot, a database migration — the naive fix is retry with jitter: sleep a random amount, try again, hope for the best. It works until it doesn't. Under load, agents collide repeatedly, waste work already done, and wait time is unbounded.
+
+turnq replaces that gamble with a queue. Clients enqueue on a named channel, receive their turn when they're at the front, do their work, and release. Exactly one client holds the token at a time. Order is strict FIFO. No retries, no conflicts, no tuning magic numbers.
 
 Two modes: **local** (file lock, no server) and **distributed** (HTTP server, multi-host).
 
