@@ -6,12 +6,6 @@ Two modes: **local** (file lock, no server) and **distributed** (HTTP server, mu
 
 ---
 
-## In one sentence
-
-Jitter answers *"is it free?"* — turnq answers *"when is it my turn?"*
-
----
-
 ## Quick start
 
 ```typescript
