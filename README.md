@@ -233,6 +233,195 @@ func withTurn(baseURL, channel, apiKey string, fn func() error) error {
 
 ---
 
+## Java
+
+```java
+import java.net.http.*;
+import java.net.URI;
+import java.util.UUID;
+
+var turnqUrl  = "https://turnq.example.com";
+var channel   = "my-channel";
+var clientId  = UUID.randomUUID().toString();
+var http      = HttpClient.newHttpClient();
+
+// Enqueue
+var enqResp = http.send(
+    HttpRequest.newBuilder()
+        .POST(HttpRequest.BodyPublishers.ofString("{\"clientId\":\"" + clientId + "\"}"))
+        .uri(URI.create(turnqUrl + "/channels/" + channel + "/enqueue"))
+        .header("x-api-key", apiKey).header("content-type", "application/json")
+        .build(),
+    HttpResponse.BodyHandlers.ofString());
+var requestId = parseRequestId(enqResp.body());
+
+// Subscribe (SSE)
+var sseResp = http.send(
+    HttpRequest.newBuilder()
+        .GET()
+        .uri(URI.create(turnqUrl + "/channels/" + channel +
+            "/subscribe?clientId=" + clientId + "&requestId=" + requestId))
+        .header("x-api-key", apiKey)
+        .build(),
+    HttpResponse.BodyHandlers.ofLines());
+
+String currentEvent = "";
+for (var line : (Iterable<String>) sseResp.body()::iterator) {
+    if (line.startsWith("event:"))            currentEvent = line.substring(6).trim();
+    else if (line.startsWith("data:") && "your-turn".equals(currentEvent)) break;
+}
+
+// Do work
+doWork();
+
+// Release
+http.send(
+    HttpRequest.newBuilder()
+        .POST(HttpRequest.BodyPublishers.ofString(
+            "{\"clientId\":\"" + clientId + "\",\"requestId\":\"" + requestId + "\"}"))
+        .uri(URI.create(turnqUrl + "/channels/" + channel + "/release"))
+        .header("x-api-key", apiKey).header("content-type", "application/json")
+        .build(),
+    HttpResponse.BodyHandlers.discarding());
+```
+
+---
+
+## C#
+
+```csharp
+using System.Net.Http;
+using System.Text;
+using System.Text.Json;
+
+var turnqUrl  = "https://turnq.example.com";
+var channel   = "my-channel";
+var clientId  = Guid.NewGuid().ToString();
+var http      = new HttpClient();
+http.DefaultRequestHeaders.Add("x-api-key", Environment.GetEnvironmentVariable("TURNQ_API_KEY"));
+
+// Enqueue
+var enqRes = await http.PostAsync(
+    $"{turnqUrl}/channels/{channel}/enqueue",
+    new StringContent($$"""{"clientId":"{{clientId}}"}""", Encoding.UTF8, "application/json"));
+var enqJson   = JsonDocument.Parse(await enqRes.Content.ReadAsStringAsync());
+var requestId = enqJson.RootElement.GetProperty("requestId").GetString()!;
+
+// Subscribe (SSE)
+using var stream = await http.GetStreamAsync(
+    $"{turnqUrl}/channels/{channel}/subscribe?clientId={clientId}&requestId={requestId}");
+using var reader = new StreamReader(stream);
+
+string currentEvent = "", line;
+while ((line = await reader.ReadLineAsync() ?? "") != null) {
+    if (line.StartsWith("event:"))                                    currentEvent = line[6..].Trim();
+    else if (line.StartsWith("data:") && currentEvent == "your-turn") break;
+}
+
+// Do work
+await DoWorkAsync();
+
+// Release
+await http.PostAsync(
+    $"{turnqUrl}/channels/{channel}/release",
+    new StringContent($$"""{"clientId":"{{clientId}}","requestId":"{{requestId}}"}""",
+        Encoding.UTF8, "application/json"));
+```
+
+---
+
+## Rust
+
+```rust
+use reqwest::Client;
+use serde_json::{json, Value};
+use uuid::Uuid;
+
+async fn with_turn<F, Fut>(base_url: &str, channel: &str, api_key: &str, work: F) -> anyhow::Result<()>
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = anyhow::Result<()>>,
+{
+    let client    = Client::new();
+    let client_id = Uuid::new_v4().to_string();
+
+    // Enqueue
+    let enq: Value = client
+        .post(format!("{base_url}/channels/{channel}/enqueue"))
+        .header("x-api-key", api_key)
+        .json(&json!({ "clientId": client_id }))
+        .send().await?.json().await?;
+    let request_id = enq["requestId"].as_str().unwrap().to_owned();
+
+    // Subscribe (SSE)
+    let url      = format!("{base_url}/channels/{channel}/subscribe?clientId={client_id}&requestId={request_id}");
+    let mut resp = client.get(&url).header("x-api-key", api_key).send().await?;
+
+    let mut current_event = String::new();
+    'sse: while let Some(chunk) = resp.chunk().await? {
+        for line in std::str::from_utf8(&chunk)?.lines() {
+            if let Some(ev) = line.strip_prefix("event:") { current_event = ev.trim().to_owned(); }
+            else if line.starts_with("data:") && current_event == "your-turn" { break 'sse; }
+        }
+    }
+
+    // Do work
+    let result = work().await;
+
+    // Release
+    client.post(format!("{base_url}/channels/{channel}/release"))
+        .header("x-api-key", api_key)
+        .json(&json!({
+            "clientId":  client_id,
+            "requestId": request_id,
+            "result": { "success": result.is_ok() }
+        }))
+        .send().await?;
+
+    result
+}
+```
+
+---
+
+## PowerShell
+
+```powershell
+$TurnqUrl  = "https://turnq.example.com"
+$Channel   = "my-channel"
+$ClientId  = [System.Guid]::NewGuid().ToString()
+$Headers   = @{ "x-api-key" = $env:TURNQ_API_KEY; "Content-Type" = "application/json" }
+
+# Enqueue
+$Enq       = Invoke-RestMethod -Method POST -Uri "$TurnqUrl/channels/$Channel/enqueue" `
+               -Headers $Headers -Body (ConvertTo-Json @{ clientId = $ClientId })
+$RequestId = $Enq.requestId
+
+# Subscribe (SSE) — read until your-turn
+$Req    = [System.Net.WebRequest]::Create("$TurnqUrl/channels/$Channel/subscribe?clientId=$ClientId&requestId=$RequestId")
+$Req.Headers["x-api-key"] = $env:TURNQ_API_KEY
+$Stream = $Req.GetResponse().GetResponseStream()
+$Reader = New-Object System.IO.StreamReader($Stream)
+
+$CurrentEvent = ""
+while (-not $Reader.EndOfStream) {
+    $Line = $Reader.ReadLine()
+    if ($Line -match "^event:\s*(.+)")            { $CurrentEvent = $Matches[1] }
+    elseif ($Line -match "^data:" -and $CurrentEvent -eq "your-turn") { break }
+}
+$Reader.Close()
+
+# Do work
+Invoke-YourWork
+
+# Release
+Invoke-RestMethod -Method POST -Uri "$TurnqUrl/channels/$Channel/release" `
+    -Headers $Headers `
+    -Body (ConvertTo-Json @{ clientId = $ClientId; requestId = $RequestId })
+```
+
+---
+
 ## License
 
 MIT.
