@@ -1,4 +1,4 @@
-import { ToknServer } from './server.ts';
+import { TurnqServer } from './server.ts';
 import { Persistence } from './persist.ts';
 import { logger } from './logger.ts';
 
@@ -12,7 +12,7 @@ if (!apiKey) {
 }
 
 const persist = persistPath ? new Persistence(persistPath) : undefined;
-const server  = new ToknServer({ apiKey, port, persist });
+const server  = new TurnqServer({ apiKey, port, persist });
 
 async function shutdown(signal: string) {
   logger.info('shutting down', { signal });
