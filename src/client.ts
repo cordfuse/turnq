@@ -1,10 +1,10 @@
 import EventEmitter from 'events';
 import { randomUUID } from 'crypto';
 import { WebSocket } from 'ws';
-import { ToknError } from './errors.js';
+import { TurnqError } from './errors.js';
 import type { ChannelInfo } from './protocol.js';
 
-export interface ToknClientOptions {
+export interface TurnqClientOptions {
   apiKey?: string;
   preferSse?: boolean;
   maxReconnectAttempts?: number;
@@ -49,12 +49,12 @@ async function* parseSse(body: ReadableStream<Uint8Array>) {
   }
 }
 
-export class ToknClient extends EventEmitter {
+export class TurnqClient extends EventEmitter {
   private baseUrl: string;
-  private opts: ToknClientOptions;
+  private opts: TurnqClientOptions;
   private headers: Record<string, string>;
 
-  constructor(url: string, opts?: ToknClientOptions) {
+  constructor(url: string, opts?: TurnqClientOptions) {
     super();
     this.baseUrl = url.replace(/\/$/, '');
     this.opts = opts ?? {};
@@ -77,7 +77,7 @@ export class ToknClient extends EventEmitter {
     });
     if (!res.ok && res.status !== 409) {
       const body = await res.json().catch(() => ({}));
-      throw new ToknError(body.code ?? 'INTERNAL_ERROR', body.message ?? 'createChannel failed');
+      throw new TurnqError(body.code ?? 'INTERNAL_ERROR', body.message ?? 'createChannel failed');
     }
   }
 
@@ -85,7 +85,7 @@ export class ToknClient extends EventEmitter {
     const res = await this.fetch(`/channels/${name}`, { method: 'DELETE' });
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
-      throw new ToknError(body.code ?? 'INTERNAL_ERROR', body.message ?? 'deleteChannel failed');
+      throw new TurnqError(body.code ?? 'INTERNAL_ERROR', body.message ?? 'deleteChannel failed');
     }
   }
 
@@ -110,7 +110,7 @@ export class ToknClient extends EventEmitter {
     });
     if (!enqRes.ok) {
       const body = await enqRes.json().catch(() => ({}));
-      throw new ToknError(body.code ?? 'INTERNAL_ERROR', body.message ?? 'enqueue failed');
+      throw new TurnqError(body.code ?? 'INTERNAL_ERROR', body.message ?? 'enqueue failed');
     }
     const { requestId } = await enqRes.json();
 
@@ -132,7 +132,7 @@ export class ToknClient extends EventEmitter {
         return await this.runWithSubscription<T>(channel, clientId, requestId, fn);
       } catch (err) {
         // protocol errors (lease expired, not your turn, etc.) — don't retry
-        if (err instanceof ToknError) throw err;
+        if (err instanceof TurnqError) throw err;
 
         if (attempt >= maxAttempts) throw err;
         attempt++;
@@ -194,7 +194,7 @@ export class ToknClient extends EventEmitter {
         } else if (msg.event === 'timeout') {
           ws.close();
           this.emit('timeout', { channel, requestId });
-          reject(new ToknError('LEASE_EXPIRED', 'Turn timed out'));
+          reject(new TurnqError('LEASE_EXPIRED', 'Turn timed out'));
         } else if (msg.event === 'server-shutdown') {
           ws.close();
           reject(new Error('server_shutdown'));
@@ -232,7 +232,7 @@ export class ToknClient extends EventEmitter {
         }
       } else if (event === 'timeout') {
         this.emit('timeout', { channel, requestId });
-        throw new ToknError('LEASE_EXPIRED', 'Turn timed out');
+        throw new TurnqError('LEASE_EXPIRED', 'Turn timed out');
       } else if (event === 'server-shutdown') {
         throw new Error('server_shutdown');
       }

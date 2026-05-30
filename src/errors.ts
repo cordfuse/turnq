@@ -9,13 +9,13 @@ export type ErrorCode =
   | 'MALFORMED_REQUEST'
   | 'INTERNAL_ERROR';
 
-export class ToknError extends Error {
+export class TurnqError extends Error {
   constructor(
     public readonly code: ErrorCode,
     message: string,
     public readonly detail?: string,
   ) {
     super(message);
-    this.name = 'ToknError';
+    this.name = 'TurnqError';
   }
 }

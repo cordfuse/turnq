@@ -3,13 +3,13 @@ import type { IncomingMessage, ServerResponse } from 'http';
 import express from 'express';
 import { WebSocket, WebSocketServer } from 'ws';
 import { randomUUID } from 'crypto';
-import { ToknError } from './errors.ts';
+import { TurnqError } from './errors.ts';
 import { logger } from './logger.ts';
 import { metrics } from './metrics.ts';
 import type { Persistence } from './persist.ts';
 import type { ChannelInfo, QueueEntryInfo } from './protocol.ts';
 
-export interface ToknServerOptions {
+export interface TurnqServerOptions {
   apiKey?: string;
   auth?: (req: IncomingMessage) => boolean | Promise<boolean>;
   port?: number;
@@ -43,8 +43,8 @@ interface Channel {
   observers: Set<Subscriber>;
 }
 
-export class ToknServer {
-  private opts: ToknServerOptions;
+export class TurnqServer {
+  private opts: TurnqServerOptions;
   private channels = new Map<string, Channel>();
   private app = express();
   private httpServer = createServer(this.app);
@@ -52,7 +52,7 @@ export class ToknServer {
   private wsAlive = new WeakMap<WebSocket, boolean>();
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 
-  constructor(opts?: ToknServerOptions) {
+  constructor(opts?: TurnqServerOptions) {
     this.opts = opts ?? {};
     this.app.use(express.json());
     this.app.use(this.requestLogger);

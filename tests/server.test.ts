@@ -1,15 +1,15 @@
 import { describe, it, expect, beforeAll, afterAll } from 'bun:test';
-import { ToknServer } from '../src/server.ts';
-import { ToknClient } from '../src/client.ts';
+import { TurnqServer } from '../src/server.ts';
+import { TurnqClient } from '../src/client.ts';
 
 const PORT = 3099;
 const API_KEY = 'test-key';
 const BASE = `http://localhost:${PORT}`;
 
-let server: ToknServer;
+let server: TurnqServer;
 
 beforeAll(async () => {
-  server = new ToknServer({ apiKey: API_KEY, port: PORT });
+  server = new TurnqServer({ apiKey: API_KEY, port: PORT });
   await server.start();
 });
 
@@ -102,7 +102,7 @@ describe('channels CRUD', () => {
 
 describe('withTurn', () => {
   it('single client completes successfully', async () => {
-    const client = new ToknClient(BASE, { apiKey: API_KEY });
+    const client = new TurnqClient(BASE, { apiKey: API_KEY });
     await fetch(`${BASE}/channels`, authed({
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -130,8 +130,8 @@ describe('FIFO ordering', () => {
     }));
 
     const order: number[] = [];
-    const c1 = new ToknClient(BASE, { apiKey: API_KEY });
-    const c2 = new ToknClient(BASE, { apiKey: API_KEY });
+    const c1 = new TurnqClient(BASE, { apiKey: API_KEY });
+    const c2 = new TurnqClient(BASE, { apiKey: API_KEY });
 
     // Enqueue both before subscribing
     const e1 = await fetch(`${BASE}/channels/fifo-test/enqueue`, authed({

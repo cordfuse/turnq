@@ -1,7 +1,7 @@
 import { mkdir, writeFile, rm } from 'fs/promises';
 import { join } from 'path';
 import { spawn } from 'child_process';
-import { ToknClient } from '../src/client.ts';
+import { TurnqClient } from '../src/client.ts';
 
 const WORKERS   = 20;
 const TURNQ_URL  = 'http://localhost:3003';
@@ -76,7 +76,7 @@ async function runJitter(clones: string[]): Promise<{ ms: number; retries: numbe
   return { ms: Date.now() - start, retries: totalRetries };
 }
 
-async function runTurnq(clones: string[], client: ToknClient): Promise<{ ms: number }> {
+async function runTurnq(clones: string[], client: TurnqClient): Promise<{ ms: number }> {
   const start = Date.now();
 
   await Promise.all(clones.map(async (dir, i) => {
@@ -106,7 +106,7 @@ process.stdout.write(`--- JITTER (max ${JITTER_MS}ms per retry) ---\n`);
 const jitter = await runJitter(jitterSetup.clones);
 process.stdout.write(`done: ${(jitter.ms / 1000).toFixed(2)}s — ${jitter.retries} retries\n\n`);
 
-const client = new ToknClient(TURNQ_URL, { apiKey: API_KEY });
+const client = new TurnqClient(TURNQ_URL, { apiKey: API_KEY });
 await client.createChannel(CHANNEL, { leaseMs: 60_000 });
 
 process.stdout.write(`--- TURNQ ---\n`);
