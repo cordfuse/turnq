@@ -14,6 +14,10 @@
     "./local": {
       "types": "./types/local.d.ts",
       "bun": "./src/local.ts"
+    },
+    "./coordinator": {
+      "types": "./types/coordinator.d.ts",
+      "bun": "./src/coordinator.ts"
     }
   },
   "scripts": {
