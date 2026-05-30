@@ -10,6 +10,10 @@
       "bun": "./src/client.ts",
       "import": "./dist/client.js",
       "types": "./dist/client.d.ts"
+    },
+    "./local": {
+      "types": "./types/local.d.ts",
+      "bun": "./src/local.ts"
     }
   },
   "scripts": {
