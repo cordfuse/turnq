@@ -2,7 +2,7 @@
 
 Named-channel turn coordinator. Exactly one client holds the token at a time. Order is strict FIFO.
 
-Pronounced "token." Two modes: **local** (file lock, no server) and **distributed** (HTTP server, multi-host).
+Two modes: **local** (file lock, no server) and **distributed** (HTTP server, multi-host).
 
 ---
 
