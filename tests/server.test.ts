@@ -21,18 +21,7 @@ function authed(init?: RequestInit): RequestInit {
   return { ...init, headers: { 'x-api-key': API_KEY, ...(init?.headers as Record<string, string> | undefined) } };
 }
 
-// ── 1. health ──────────────────────────────────────────────────────────────────
-
-describe('health', () => {
-  it('GET /health → 200 { ok: true }', async () => {
-    const res = await fetch(`${BASE}/health`);
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.ok).toBe(true);
-  });
-});
-
-// ── 2. auth ────────────────────────────────────────────────────────────────────
+// ── 1. auth ────────────────────────────────────────────────────────────────────
 
 describe('auth', () => {
   it('missing key → 401', async () => {
@@ -268,7 +257,138 @@ describe('abort', () => {
   });
 });
 
-// ── 8. 401 on all /channels endpoints ─────────────────────────────────────────
+// ── 8. admin endpoints ────────────────────────────────────────────────────────
+
+describe('admin: GET /channels/:name/queue', () => {
+  it('returns queue state', async () => {
+    await fetch(`${BASE}/channels`, authed({
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'admin-queue-test', leaseMs: 5000 }),
+    }));
+    await fetch(`${BASE}/channels/admin-queue-test/enqueue`, authed({
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ clientId: 'aq-c1' }),
+    }));
+    const res = await fetch(`${BASE}/channels/admin-queue-test/queue`, authed());
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.depth).toBe(1);
+    expect(body.queue[0].clientId).toBe('aq-c1');
+    expect(typeof body.queue[0].waitingMs).toBe('number');
+    // cleanup
+    await fetch(`${BASE}/channels/admin-queue-test/abort`, authed({
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ clientId: 'aq-c1' }),
+    }));
+    await fetch(`${BASE}/channels/admin-queue-test`, authed({ method: 'DELETE' }));
+  });
+});
+
+describe('admin: DELETE /channels/:name/holder', () => {
+  it('force-releases active turn, next client gets turn', async () => {
+    await fetch(`${BASE}/channels`, authed({
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'force-release-test', leaseMs: 30000 }),
+    }));
+
+    const e1 = await fetch(`${BASE}/channels/force-release-test/enqueue`, authed({
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ clientId: 'fr-c1' }),
+    })).then((r) => r.json());
+
+    const e2 = await fetch(`${BASE}/channels/force-release-test/enqueue`, authed({
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ clientId: 'fr-c2' }),
+    })).then((r) => r.json());
+
+    // c1 subscribes and holds
+    const c1Done = subscribeAndHold(BASE, API_KEY, 'force-release-test', 'fr-c1', e1.requestId);
+
+    // wait for c1 to be active
+    await new Promise((r) => setTimeout(r, 50));
+
+    // admin force-release c1
+    const forceRes = await fetch(`${BASE}/channels/force-release-test/holder`, authed({ method: 'DELETE' }));
+    expect(forceRes.status).toBe(204);
+
+    // c2 should now get turn
+    const got = await subscribeAndCapture(BASE, API_KEY, 'force-release-test', 'fr-c2', e2.requestId);
+    expect(got).toBe(true);
+
+    await fetch(`${BASE}/channels/force-release-test/release`, authed({
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ clientId: 'fr-c2', requestId: e2.requestId }),
+    }));
+
+    await c1Done;
+    await fetch(`${BASE}/channels/force-release-test`, authed({ method: 'DELETE' }));
+  });
+});
+
+// ── 9. max wait timeout ────────────────────────────────────────────────────────
+
+describe('maxWaitMs', () => {
+  it('client evicted after max wait, receives timeout event', async () => {
+    await fetch(`${BASE}/channels`, authed({
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'maxwait-test', leaseMs: 30000, maxWaitMs: 200 }),
+    }));
+
+    // c1 holds the channel
+    const e1 = await fetch(`${BASE}/channels/maxwait-test/enqueue`, authed({
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ clientId: 'mw-c1' }),
+    })).then((r) => r.json());
+
+    // c2 enqueues and subscribes — should timeout after 200ms
+    const e2 = await fetch(`${BASE}/channels/maxwait-test/enqueue`, authed({
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ clientId: 'mw-c2' }),
+    })).then((r) => r.json());
+
+    const c1Done = subscribeAndHold(BASE, API_KEY, 'maxwait-test', 'mw-c1', e1.requestId);
+    const timedOut = await subscribeAndCaptureTimeout(BASE, API_KEY, 'maxwait-test', 'mw-c2', e2.requestId);
+    expect(timedOut).toBe(true);
+
+    await fetch(`${BASE}/channels/maxwait-test/release`, authed({
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ clientId: 'mw-c1', requestId: e1.requestId }),
+    }));
+
+    await c1Done;
+    await fetch(`${BASE}/channels/maxwait-test`, authed({ method: 'DELETE' }));
+  });
+});
+
+// ── 10. metrics endpoint ───────────────────────────────────────────────────────
+
+describe('metrics', () => {
+  it('GET /metrics → 200 Prometheus text', async () => {
+    const res = await fetch(`${BASE}/metrics`, authed());
+    expect(res.status).toBe(200);
+    const text = await res.text();
+    expect(text).toContain('tokn_requests_total');
+    expect(text).toContain('tokn_active_channels');
+  });
+
+  it('GET /metrics without key → 401', async () => {
+    const res = await fetch(`${BASE}/metrics`);
+    expect(res.status).toBe(401);
+  });
+});
+
+// ── 11. health includes uptime ─────────────────────────────────────────────────
+
+describe('health', () => {
+  it('GET /health includes uptime', async () => {
+    const res = await fetch(`${BASE}/health`);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(typeof body.uptime).toBe('number');
+  });
+});
+
+// ── 12. 401 on all /channels endpoints ────────────────────────────────────────
 
 describe('401 on all /channels endpoints without key', () => {
   it('POST /channels → 401', async () => {
@@ -293,7 +413,40 @@ describe('401 on all /channels endpoints without key', () => {
   });
 });
 
-// ── helpers ────────────────────────────────────────────────────────────────────
+// ── helpers ───────────────────────────────────────────────────────────────────
+
+async function subscribeAndCaptureTimeout(
+  base: string,
+  apiKey: string,
+  channel: string,
+  clientId: string,
+  requestId: string,
+): Promise<boolean> {
+  const apiKeyParam = `&apiKey=${encodeURIComponent(apiKey)}`;
+  const sseUrl = `${base}/channels/${channel}/subscribe?clientId=${clientId}&requestId=${requestId}${apiKeyParam}`;
+  try {
+    const res = await fetch(sseUrl, { headers: { 'x-api-key': apiKey } });
+    if (!res.body) return false;
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    let currentEvent = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop() ?? '';
+      for (const line of lines) {
+        if (line.startsWith('event:')) currentEvent = line.slice(6).trim();
+        else if (line.startsWith('data:') && currentEvent === 'timeout') return true;
+      }
+    }
+  } catch { /* ignore */ }
+  return false;
+}
+
+// ── original helpers ───────────────────────────────────────────────────────────
 
 async function runTurnById(
   base: string,

@@ -1,12 +1,21 @@
 export interface ChannelMeta {
   leaseMs: number;
   maxDepth?: number;
+  maxWaitMs?: number;
 }
 
 export interface ChannelInfo extends ChannelMeta {
   name: string;
   depth: number;
   active: string | null;
+}
+
+export interface QueueEntryInfo {
+  clientId: string;
+  requestId: string;
+  position: number;
+  enqueuedAt: number;
+  waitingMs: number;
 }
 
 export interface QueuedPayload {

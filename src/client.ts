@@ -7,6 +7,11 @@ import type { ChannelInfo } from './protocol.ts';
 export interface ToknClientOptions {
   apiKey?: string;
   preferSse?: boolean;
+  maxReconnectAttempts?: number;
+}
+
+export interface WithTurnOptions {
+  maxWaitMs?: number;
 }
 
 export interface TurnContext {
@@ -16,18 +21,9 @@ export interface TurnContext {
 async function connectWss(url: string, headers: Record<string, string>): Promise<WebSocket> {
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(url, { headers });
-    const timer = setTimeout(() => {
-      ws.close();
-      reject(new Error('timeout'));
-    }, 2000);
-    ws.on('open', () => {
-      clearTimeout(timer);
-      resolve(ws);
-    });
-    ws.on('error', (e) => {
-      clearTimeout(timer);
-      reject(e);
-    });
+    const timer = setTimeout(() => { ws.close(); reject(new Error('timeout')); }, 2000);
+    ws.on('open', () => { clearTimeout(timer); resolve(ws); });
+    ws.on('error', (e) => { clearTimeout(timer); reject(e); });
   });
 }
 
@@ -46,8 +42,7 @@ async function* parseSse(body: ReadableStream<Uint8Array>) {
       if (line.startsWith('event:')) {
         currentEvent = line.slice(6).trim();
       } else if (line.startsWith('data:')) {
-        const data = JSON.parse(line.slice(5).trim());
-        yield { event: currentEvent, data };
+        yield { event: currentEvent, data: JSON.parse(line.slice(5).trim()) };
         currentEvent = '';
       }
     }
@@ -74,7 +69,7 @@ export class ToknClient extends EventEmitter {
     return res;
   }
 
-  async createChannel(name: string, opts?: { leaseMs?: number; maxDepth?: number }): Promise<void> {
+  async createChannel(name: string, opts?: { leaseMs?: number; maxDepth?: number; maxWaitMs?: number }): Promise<void> {
     const res = await this.fetch('/channels', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -104,6 +99,7 @@ export class ToknClient extends EventEmitter {
     channel: string,
     fn: (ctx: TurnContext) => Promise<void>,
     clientId?: string,
+    opts?: WithTurnOptions,
   ): Promise<void> {
     const cid = clientId ?? randomUUID();
 
@@ -118,7 +114,33 @@ export class ToknClient extends EventEmitter {
     }
     const { requestId } = await enqRes.json();
 
-    await this.runWithSubscription(channel, cid, requestId, fn);
+    await this.runWithReconnect(channel, cid, requestId, fn, opts);
+  }
+
+  private async runWithReconnect(
+    channel: string,
+    clientId: string,
+    requestId: string,
+    fn: (ctx: TurnContext) => Promise<void>,
+    opts?: WithTurnOptions,
+  ): Promise<void> {
+    const maxAttempts = this.opts.maxReconnectAttempts ?? 5;
+    let attempt = 0;
+
+    while (true) {
+      try {
+        return await this.runWithSubscription(channel, clientId, requestId, fn);
+      } catch (err) {
+        // protocol errors (lease expired, not your turn, etc.) — don't retry
+        if (err instanceof ToknError) throw err;
+
+        if (attempt >= maxAttempts) throw err;
+        attempt++;
+
+        const backoffMs = Math.min(100 * Math.pow(2, attempt), 5000);
+        await new Promise((r) => setTimeout(r, backoffMs));
+      }
+    }
   }
 
   private async runWithSubscription(
@@ -153,40 +175,35 @@ export class ToknClient extends EventEmitter {
     return new Promise((resolve, reject) => {
       ws.on('message', async (raw) => {
         let msg: { event: string; data: unknown };
-        try {
-          msg = JSON.parse(raw.toString());
-        } catch {
-          return;
-        }
+        try { msg = JSON.parse(raw.toString()); } catch { return; }
 
         if (msg.event === 'your-turn') {
           ws.removeAllListeners('message');
           ws.removeAllListeners('error');
           try {
-            const ctx = this.makeTurnContext(channel, clientId);
-            await fn(ctx);
+            await fn(this.makeTurnContext(channel, clientId));
             await this.release(channel, clientId, requestId, true);
             ws.close();
             resolve();
           } catch (err: unknown) {
-            const msg2 = err instanceof Error ? err.message : String(err);
-            await this.release(channel, clientId, requestId, false, msg2).catch(() => {});
+            const m = err instanceof Error ? err.message : String(err);
+            await this.release(channel, clientId, requestId, false, m).catch(() => {});
             ws.close();
             reject(err);
           }
         } else if (msg.event === 'timeout') {
           ws.close();
-          const e = new ToknError('LEASE_EXPIRED', 'Turn lease expired');
           this.emit('timeout', { channel, requestId });
-          reject(e);
+          reject(new ToknError('LEASE_EXPIRED', 'Turn timed out'));
+        } else if (msg.event === 'server-shutdown') {
+          ws.close();
+          reject(new Error('server_shutdown'));
         }
       });
 
       ws.on('error', (err) => reject(err));
-      ws.on('close', (code, reason) => {
-        if (code !== 1000) {
-          reject(new Error(`WebSocket closed: ${code} ${reason}`));
-        }
+      ws.on('close', (code) => {
+        if (code !== 1000) reject(new Error(`WebSocket closed: ${code}`));
       });
     });
   }
@@ -205,19 +222,19 @@ export class ToknClient extends EventEmitter {
     for await (const { event, data } of parseSse(res.body as ReadableStream<Uint8Array>)) {
       if (event === 'your-turn') {
         try {
-          const ctx = this.makeTurnContext(channel, clientId);
-          await fn(ctx);
+          await fn(this.makeTurnContext(channel, clientId));
           await this.release(channel, clientId, requestId, true);
           return;
         } catch (err: unknown) {
-          const msg = err instanceof Error ? err.message : String(err);
-          await this.release(channel, clientId, requestId, false, msg).catch(() => {});
+          const m = err instanceof Error ? err.message : String(err);
+          await this.release(channel, clientId, requestId, false, m).catch(() => {});
           throw err;
         }
       } else if (event === 'timeout') {
-        const e = new ToknError('LEASE_EXPIRED', 'Turn lease expired');
         this.emit('timeout', { channel, requestId });
-        throw e;
+        throw new ToknError('LEASE_EXPIRED', 'Turn timed out');
+      } else if (event === 'server-shutdown') {
+        throw new Error('server_shutdown');
       }
     }
   }
@@ -238,11 +255,11 @@ export class ToknClient extends EventEmitter {
             body: JSON.stringify({ clientId, step: name, event: 'end', success: true }),
           });
         } catch (err: unknown) {
-          const msg = err instanceof Error ? err.message : String(err);
+          const m = err instanceof Error ? err.message : String(err);
           await this.fetch(`/channels/${channel}/steps`, {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ clientId, step: name, event: 'end', success: false, error: msg }),
+            body: JSON.stringify({ clientId, step: name, event: 'end', success: false, error: m }),
           }).catch(() => {});
           throw err;
         }
@@ -250,13 +267,7 @@ export class ToknClient extends EventEmitter {
     };
   }
 
-  private async release(
-    channel: string,
-    clientId: string,
-    requestId: string,
-    success: boolean,
-    error?: string,
-  ): Promise<void> {
+  private async release(channel: string, clientId: string, requestId: string, success: boolean, error?: string) {
     await this.fetch(`/channels/${channel}/release`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
