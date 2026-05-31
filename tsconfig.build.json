@@ -12,5 +12,5 @@
     "declarationMap": false,
     "sourceMap": false
   },
-  "include": ["src/client.ts", "src/errors.ts", "src/protocol.ts"]
+  "include": ["src/client.ts", "src/errors.ts", "src/protocol.ts", "src/coordinator-node.ts"]
 }
