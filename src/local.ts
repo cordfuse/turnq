@@ -1,15 +1,64 @@
 import { tmpdir } from 'os';
 import { mkdirSync, openSync, closeSync } from 'fs';
-import { dlopen, FFIType } from 'bun:ffi';
+import { dlopen, FFIType, ptr } from 'bun:ffi';
 
-const LOCK_EX = 2;
-const LOCK_UN = 8;
-const LOCK_NB = 4;
+// ---------- platform locking ----------
 
-const libName = process.platform === 'darwin' ? 'libSystem.B.dylib' : 'libc.so.6';
-const { symbols: { flock } } = dlopen(libName, {
-  flock: { args: [FFIType.i32, FFIType.i32], returns: FFIType.i32 },
-});
+type LockFn = (fd: number) => boolean;  // true = acquired
+type UnlockFn = (fd: number) => void;
+
+function buildPosix(): { lock: LockFn; unlock: UnlockFn } {
+  const LOCK_EX = 2, LOCK_NB = 4, LOCK_UN = 8;
+  const libName = process.platform === 'darwin' ? 'libSystem.B.dylib' : 'libc.so.6';
+  const { symbols: { flock } } = dlopen(libName, {
+    flock: { args: [FFIType.i32, FFIType.i32], returns: FFIType.i32 },
+  });
+  return {
+    lock: fd => flock(fd, LOCK_EX | LOCK_NB) === 0,
+    unlock: fd => { flock(fd, LOCK_UN); },
+  };
+}
+
+function buildWindows(): { lock: LockFn; unlock: UnlockFn } {
+  // _get_osfhandle: converts a CRT fd to a Win32 HANDLE
+  const { symbols: { _get_osfhandle } } = dlopen('msvcrt', {
+    _get_osfhandle: { args: [FFIType.i32], returns: FFIType.pointer },
+  });
+
+  // OVERLAPPED struct (32 bytes on x64): all zeros = lock from byte 0
+  const overlapped = new Uint8Array(32);
+  const overlappedPtr = ptr(overlapped);
+  const MAXDWORD = 0xffffffff;
+  const LOCKFILE_EXCLUSIVE_LOCK = 0x00000002;
+  const LOCKFILE_FAIL_IMMEDIATELY = 0x00000001;
+
+  const { symbols: { LockFileEx, UnlockFileEx } } = dlopen('kernel32', {
+    LockFileEx: {
+      args: [FFIType.pointer, FFIType.u32, FFIType.u32, FFIType.u32, FFIType.u32, FFIType.pointer],
+      returns: FFIType.i32,
+    },
+    UnlockFileEx: {
+      args: [FFIType.pointer, FFIType.u32, FFIType.u32, FFIType.u32, FFIType.pointer],
+      returns: FFIType.i32,
+    },
+  });
+
+  return {
+    lock: fd => {
+      const handle = _get_osfhandle(fd);
+      return LockFileEx(handle, LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY, 0, MAXDWORD, MAXDWORD, overlappedPtr) !== 0;
+    },
+    unlock: fd => {
+      const handle = _get_osfhandle(fd);
+      UnlockFileEx(handle, 0, MAXDWORD, MAXDWORD, overlappedPtr);
+    },
+  };
+}
+
+const { lock: acquireLockOnce, unlock: releaseLock } =
+  process.platform === 'win32' ? buildWindows() : buildPosix();
+
+// ---------- client ----------
 
 export class LocalTurnqClient {
   private lockDir: string;
@@ -28,14 +77,14 @@ export class LocalTurnqClient {
       await this.acquireLock(fd);
       return await fn();
     } finally {
-      flock(fd, LOCK_UN);
+      releaseLock(fd);
       closeSync(fd);
     }
   }
 
   private async acquireLock(fd: number): Promise<void> {
     while (true) {
-      if (flock(fd, LOCK_EX | LOCK_NB) === 0) return;
+      if (acquireLockOnce(fd)) return;
       await new Promise(r => setTimeout(r, 50));
     }
   }
