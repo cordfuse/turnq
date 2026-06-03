@@ -1,6 +1,6 @@
 import { tmpdir } from 'os';
 import { mkdirSync, openSync, closeSync } from 'fs';
-import { dlopen, FFIType, ptr } from 'bun:ffi';
+import { dlopen, FFIType } from 'bun:ffi';
 
 // ---------- platform locking ----------
 
@@ -19,44 +19,17 @@ function buildPosix(): { lock: LockFn; unlock: UnlockFn } {
   };
 }
 
-function buildWindows(): { lock: LockFn; unlock: UnlockFn } {
-  // _get_osfhandle: converts a CRT fd to a Win32 HANDLE
-  const { symbols: { _get_osfhandle } } = dlopen('msvcrt', {
-    _get_osfhandle: { args: [FFIType.i32], returns: FFIType.pointer },
-  });
-
-  // OVERLAPPED struct (32 bytes on x64): all zeros = lock from byte 0
-  const overlapped = new Uint8Array(32);
-  const overlappedPtr = ptr(overlapped);
-  const MAXDWORD = 0xffffffff;
-  const LOCKFILE_EXCLUSIVE_LOCK = 0x00000002;
-  const LOCKFILE_FAIL_IMMEDIATELY = 0x00000001;
-
-  const { symbols: { LockFileEx, UnlockFileEx } } = dlopen('kernel32', {
-    LockFileEx: {
-      args: [FFIType.pointer, FFIType.u32, FFIType.u32, FFIType.u32, FFIType.u32, FFIType.pointer],
-      returns: FFIType.i32,
-    },
-    UnlockFileEx: {
-      args: [FFIType.pointer, FFIType.u32, FFIType.u32, FFIType.u32, FFIType.pointer],
-      returns: FFIType.i32,
-    },
-  });
-
-  return {
-    lock: fd => {
-      const handle = _get_osfhandle(fd);
-      return LockFileEx(handle, LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY, 0, MAXDWORD, MAXDWORD, overlappedPtr) !== 0;
-    },
-    unlock: fd => {
-      const handle = _get_osfhandle(fd);
-      UnlockFileEx(handle, 0, MAXDWORD, MAXDWORD, overlappedPtr);
-    },
-  };
+// Native Windows is not supported. Windows users run inside WSL2, which
+// reports as Linux (process.platform === 'linux') and uses the POSIX flock
+// path below. A bare win32 process hard-stops here rather than silently
+// running unlocked.
+if (process.platform === 'win32') {
+  throw new Error(
+    'Native Windows is not supported. Run inside WSL2 (it is treated as Linux).'
+  );
 }
 
-const { lock: acquireLockOnce, unlock: releaseLock } =
-  process.platform === 'win32' ? buildWindows() : buildPosix();
+const { lock: acquireLockOnce, unlock: releaseLock } = buildPosix();
 
 // ---------- client ----------
 
