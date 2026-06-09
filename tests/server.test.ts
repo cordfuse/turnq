@@ -413,6 +413,64 @@ describe('401 on all /channels endpoints without key', () => {
   });
 });
 
+// ── 13. channel names with slashes (URL-encoding regression) ─────────────────
+//
+// `@cordfuse/turnq`'s primary consumer (crosstalk) namespaces lock channels
+// as `<prefix>/<lock-name>` (e.g. `crosstalk-mhtest/dispatch`). The client
+// must URL-encode channel names when interpolating them into request paths,
+// otherwise Express's path router splits on the literal slash and the
+// request misroutes (CHANNEL_NOT_FOUND on enqueue, 404 on subscribe, etc.).
+//
+// This regression test caught a real outage: distributed turnq mode had
+// never worked end-to-end against crosstalk because every enqueue failed
+// with INTERNAL_ERROR — the client constructed `/channels/crosstalk/dispatch/enqueue`
+// instead of `/channels/crosstalk%2Fdispatch/enqueue`. Fix: encodeURIComponent
+// at every channel-name interpolation site in src/client.ts.
+
+describe('channel names with slashes (regression)', () => {
+  const slashName = 'crosstalk/dispatch';
+
+  it('client.withTurn works on slash-containing channel name', async () => {
+    // Pre-create the channel with the literal slash in its name (JSON body
+    // is unaffected by the URL bug; this exercises the namespace shape
+    // crosstalk uses in production).
+    await fetch(`${BASE}/channels`, authed({
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: slashName, leaseMs: 5000 }),
+    }));
+
+    const client = new TurnqClient(BASE, { apiKey: API_KEY });
+    let ran = false;
+    await client.withTurn(slashName, async () => {
+      ran = true;
+    });
+    expect(ran).toBe(true);
+
+    // cleanup — also exercises the deleteChannel encoding fix
+    await client.deleteChannel(slashName);
+  });
+
+  it('client.deleteChannel encodes the slash on the DELETE path', async () => {
+    const name = 'crosstalk/cleanup-test';
+    await fetch(`${BASE}/channels`, authed({
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name }),
+    }));
+
+    const client = new TurnqClient(BASE, { apiKey: API_KEY });
+    // Before the fix, this threw TurnqError with 'deleteChannel failed' because
+    // the unescaped slash made Express respond with 404 (no matching route).
+    await client.deleteChannel(name);
+
+    // Verify gone
+    const res = await fetch(`${BASE}/channels`, authed());
+    const body = await res.json();
+    expect(body.channels.some((c: { name: string }) => c.name === name)).toBe(false);
+  });
+});
+
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 async function subscribeAndCaptureTimeout(

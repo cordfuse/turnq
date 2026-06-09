@@ -82,7 +82,7 @@ export class TurnqClient extends EventEmitter {
   }
 
   async deleteChannel(name: string): Promise<void> {
-    const res = await this.fetch(`/channels/${name}`, { method: 'DELETE' });
+    const res = await this.fetch(`/channels/${encodeURIComponent(name)}`, { method: 'DELETE' });
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
       throw new TurnqError(body.code ?? 'INTERNAL_ERROR', body.message ?? 'deleteChannel failed');
@@ -103,7 +103,7 @@ export class TurnqClient extends EventEmitter {
   ): Promise<T> {
     const cid = clientId ?? randomUUID();
 
-    const enqRes = await this.fetch(`/channels/${channel}/enqueue`, {
+    const enqRes = await this.fetch(`/channels/${encodeURIComponent(channel)}/enqueue`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ clientId: cid }),
@@ -151,7 +151,7 @@ export class TurnqClient extends EventEmitter {
   ): Promise<T> {
     const wsBase = this.baseUrl.replace(/^http/, 'ws');
     const apiKeyParam = this.opts.apiKey ? `&apiKey=${encodeURIComponent(this.opts.apiKey)}` : '';
-    const wsUrl = `${wsBase}/channels/${channel}/subscribe?clientId=${clientId}&requestId=${requestId}${apiKeyParam}`;
+    const wsUrl = `${wsBase}/channels/${encodeURIComponent(channel)}/subscribe?clientId=${clientId}&requestId=${requestId}${apiKeyParam}`;
 
     if (!this.opts.preferSse) {
       try {
@@ -215,7 +215,7 @@ export class TurnqClient extends EventEmitter {
     fn: (ctx: TurnContext) => Promise<T>,
   ): Promise<T> {
     const apiKeyParam = this.opts.apiKey ? `&apiKey=${encodeURIComponent(this.opts.apiKey)}` : '';
-    const url = `${this.baseUrl}/channels/${channel}/subscribe?clientId=${clientId}&requestId=${requestId}${apiKeyParam}`;
+    const url = `${this.baseUrl}/channels/${encodeURIComponent(channel)}/subscribe?clientId=${clientId}&requestId=${requestId}${apiKeyParam}`;
     const res = await fetch(url, { headers: this.headers });
     if (!res.ok || !res.body) throw new Error(`SSE subscribe failed: ${res.status}`);
 
@@ -243,21 +243,21 @@ export class TurnqClient extends EventEmitter {
   private makeTurnContext(channel: string, clientId: string): TurnContext {
     return {
       withStep: async (name, fn) => {
-        await this.fetch(`/channels/${channel}/steps`, {
+        await this.fetch(`/channels/${encodeURIComponent(channel)}/steps`, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ clientId, step: name, event: 'start' }),
         });
         try {
           await fn();
-          await this.fetch(`/channels/${channel}/steps`, {
+          await this.fetch(`/channels/${encodeURIComponent(channel)}/steps`, {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify({ clientId, step: name, event: 'end', success: true }),
           });
         } catch (err: unknown) {
           const m = err instanceof Error ? err.message : String(err);
-          await this.fetch(`/channels/${channel}/steps`, {
+          await this.fetch(`/channels/${encodeURIComponent(channel)}/steps`, {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify({ clientId, step: name, event: 'end', success: false, error: m }),
@@ -269,7 +269,7 @@ export class TurnqClient extends EventEmitter {
   }
 
   private async release(channel: string, clientId: string, requestId: string, success: boolean, error?: string) {
-    await this.fetch(`/channels/${channel}/release`, {
+    await this.fetch(`/channels/${encodeURIComponent(channel)}/release`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ clientId, requestId, result: { success, error } }),
