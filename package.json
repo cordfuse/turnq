@@ -1,6 +1,6 @@
 {
   "name": "@cordfuse/turnq",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "description": "Named-channel turn coordinator. WSS-first, SSE-fallback.",
   "type": "module",
   "exports": {
