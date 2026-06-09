@@ -48,6 +48,12 @@ Single package means one version to pin, one changelog, shared protocol types th
 
 ## Transport: WSS-first, SSE fallback
 
+> **SUPERSEDED in v0.4.0 — SSE only, WSS removed.** Both confirmed 0.3.x bugs
+> lived in the WSS upgrade path, and the working configuration in production
+> UAT was always SSE (the client silently fell back). The subscribe channel is
+> one-directional, so duplex bought nothing. All WSS references below this
+> point are historical. See CLAUDE.md Doctrine.
+
 The client tries WebSocket first. If the connection fails (corporate proxy, L7 firewall, SSL inspection), it falls back to HTTP + SSE automatically. The server supports both connection types simultaneously.
 
 **Why WSS-first:**

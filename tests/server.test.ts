@@ -470,50 +470,25 @@ describe('channel names with slashes (regression)', () => {
     expect(body.channels.some((c: { name: string }) => c.name === name)).toBe(false);
   });
 
-  it('WSS subscribe decodes %2F in path on the server side', async () => {
-    // The first slash-regression test happened to pass via SSE fallback —
-    // Express auto-decodes :name params, so the SSE GET route worked. The
-    // WSS upgrade path is parsed manually in server.ts (regex against
-    // url.pathname, which does NOT decode %2F), so it would lookup
-    // `crosstalk%2Fdispatch` and miss. This test fails-fast on WSS by
-    // disabling fallback: any client.withTurn that requires SSE-fallback
-    // here will surface as a test failure rather than a silent SSE win.
-    const name = 'crosstalk/wss-test';
+  it('slash-namespaced channel names work end-to-end (%2F regression)', async () => {
+    // Channels namespaced `<prefix>/<name>` (crosstalk's default
+    // `crosstalk/dispatch`) must round-trip through URL encoding at every
+    // interpolation site. Express auto-decodes :name params, so the SSE
+    // route resolves the channel stored under the decoded name.
+    const name = 'crosstalk/sse-test';
     await fetch(`${BASE}/channels`, authed({
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ name, leaseMs: 5000 }),
     }));
 
-    // preferSse: false (default) means WSS-first. If WSS fails the client
-    // falls back to SSE silently. To prove the WSS path itself works,
-    // construct the WSS URL manually with %2F and check it sends a
-    // 'your-turn' frame instead of CHANNEL_NOT_FOUND.
-    const e = await fetch(`${BASE}/channels/${encodeURIComponent(name)}/enqueue`, authed({
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ clientId: 'wss-test-client' }),
-    })).then((r) => r.json());
-
-    const wsUrl = `ws://localhost:${PORT}/channels/${encodeURIComponent(name)}/subscribe?clientId=wss-test-client&requestId=${e.requestId}`;
-    const ws = await connectWs(wsUrl, { 'x-api-key': API_KEY });
-    const firstFrame = await new Promise<string>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('no frame within 1s')), 1000);
-      ws.once('message', (data) => {
-        clearTimeout(timer);
-        resolve(data.toString());
-      });
+    const client = new TurnqClient(BASE, { apiKey: API_KEY });
+    let ran = false;
+    await client.withTurn(name, async () => {
+      ran = true;
     });
-    expect(firstFrame).not.toContain('CHANNEL_NOT_FOUND');
-    expect(firstFrame).toContain('your-turn');
-    ws.close();
+    expect(ran).toBe(true);
 
-    // Release + cleanup
-    await fetch(`${BASE}/channels/${encodeURIComponent(name)}/release`, authed({
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ clientId: 'wss-test-client', requestId: e.requestId, result: { success: true } }),
-    }));
     await fetch(`${BASE}/channels/${encodeURIComponent(name)}`, authed({ method: 'DELETE' }));
   });
 });
@@ -561,33 +536,37 @@ async function runTurnById(
   requestId: string,
   fn: () => Promise<void>,
 ): Promise<void> {
-  const headers = { 'x-api-key': apiKey };
   const apiKeyParam = `&apiKey=${encodeURIComponent(apiKey)}`;
-  const wsUrl = `ws://localhost:${PORT}/channels/${channel}/subscribe?clientId=${clientId}&requestId=${requestId}${apiKeyParam}`;
+  const sseUrl = `${base}/channels/${channel}/subscribe?clientId=${clientId}&requestId=${requestId}${apiKeyParam}`;
+  const res = await fetch(sseUrl, { headers: { 'x-api-key': apiKey } });
+  if (!res.ok || !res.body) throw new Error(`SSE subscribe failed: ${res.status}`);
 
-  const ws = await connectWs(wsUrl, headers);
-  return new Promise((resolve, reject) => {
-    ws.on('message', async (raw: Buffer) => {
-      const msg = JSON.parse(raw.toString());
-      if (msg.event === 'your-turn') {
-        ws.removeAllListeners();
-        try {
-          await fn();
-          await fetch(`${base}/channels/${channel}/release`, {
-            method: 'POST',
-            headers: { 'x-api-key': apiKey, 'content-type': 'application/json' },
-            body: JSON.stringify({ clientId, requestId, result: { success: true } }),
-          });
-          ws.close();
-          resolve();
-        } catch (e) {
-          ws.close();
-          reject(e);
-        }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = '';
+  let currentEvent = '';
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    const lines = buf.split('\n');
+    buf = lines.pop() ?? '';
+    for (const line of lines) {
+      if (line.startsWith('event:')) {
+        currentEvent = line.slice(6).trim();
+      } else if (line.startsWith('data:') && currentEvent === 'your-turn') {
+        await fn();
+        await fetch(`${base}/channels/${channel}/release`, {
+          method: 'POST',
+          headers: { 'x-api-key': apiKey, 'content-type': 'application/json' },
+          body: JSON.stringify({ clientId, requestId, result: { success: true } }),
+        });
+        reader.cancel().catch(() => {});
+        return;
       }
-    });
-    ws.on('error', reject);
-  });
+    }
+  }
+  throw new Error('SSE stream ended before your-turn');
 }
 
 async function subscribeAndHold(
@@ -646,14 +625,4 @@ async function subscribeAndCapture(
     // ignore
   }
   return false;
-}
-
-import { WebSocket as WsClient } from 'ws';
-
-function connectWs(url: string, headers: Record<string, string>): Promise<WsClient> {
-  return new Promise((resolve, reject) => {
-    const ws = new WsClient(url, { headers });
-    ws.on('open', () => resolve(ws));
-    ws.on('error', reject);
-  });
 }

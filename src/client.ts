@@ -1,12 +1,10 @@
 import EventEmitter from 'events';
 import { randomUUID } from 'crypto';
-import { WebSocket } from 'ws';
 import { TurnqError } from './errors.js';
 import type { ChannelInfo } from './protocol.js';
 
 export interface TurnqClientOptions {
   apiKey?: string;
-  preferSse?: boolean;
   maxReconnectAttempts?: number;
 }
 
@@ -16,15 +14,6 @@ export interface WithTurnOptions {
 
 export interface TurnContext {
   withStep(name: string, fn: () => Promise<void>): Promise<void>;
-}
-
-async function connectWss(url: string, headers: Record<string, string>): Promise<WebSocket> {
-  return new Promise((resolve, reject) => {
-    const ws = new WebSocket(url, { headers });
-    const timer = setTimeout(() => { ws.close(); reject(new Error('timeout')); }, 2000);
-    ws.on('open', () => { clearTimeout(timer); resolve(ws); });
-    ws.on('error', (e) => { clearTimeout(timer); reject(e); });
-  });
 }
 
 async function* parseSse(body: ReadableStream<Uint8Array>) {
@@ -129,7 +118,7 @@ export class TurnqClient extends EventEmitter {
 
     while (true) {
       try {
-        return await this.runWithSubscription<T>(channel, clientId, requestId, fn);
+        return await this.runSse<T>(channel, clientId, requestId, fn);
       } catch (err) {
         // protocol errors (lease expired, not your turn, etc.) — don't retry
         if (err instanceof TurnqError) throw err;
@@ -141,71 +130,6 @@ export class TurnqClient extends EventEmitter {
         await new Promise((r) => setTimeout(r, backoffMs));
       }
     }
-  }
-
-  private async runWithSubscription<T>(
-    channel: string,
-    clientId: string,
-    requestId: string,
-    fn: (ctx: TurnContext) => Promise<T>,
-  ): Promise<T> {
-    const wsBase = this.baseUrl.replace(/^http/, 'ws');
-    const apiKeyParam = this.opts.apiKey ? `&apiKey=${encodeURIComponent(this.opts.apiKey)}` : '';
-    const wsUrl = `${wsBase}/channels/${encodeURIComponent(channel)}/subscribe?clientId=${clientId}&requestId=${requestId}${apiKeyParam}`;
-
-    if (!this.opts.preferSse) {
-      try {
-        const ws = await connectWss(wsUrl, this.headers);
-        return await this.runWs<T>(ws, channel, clientId, requestId, fn);
-      } catch {
-        // fall through to SSE
-      }
-    }
-
-    return await this.runSse<T>(channel, clientId, requestId, fn);
-  }
-
-  private async runWs<T>(
-    ws: WebSocket,
-    channel: string,
-    clientId: string,
-    requestId: string,
-    fn: (ctx: TurnContext) => Promise<T>,
-  ): Promise<T> {
-    return new Promise<T>((resolve, reject) => {
-      ws.on('message', async (raw) => {
-        let msg: { event: string; data: unknown };
-        try { msg = JSON.parse(raw.toString()); } catch { return; }
-
-        if (msg.event === 'your-turn') {
-          ws.removeAllListeners('message');
-          ws.removeAllListeners('error');
-          try {
-            const result = await fn(this.makeTurnContext(channel, clientId));
-            await this.release(channel, clientId, requestId, true);
-            ws.close();
-            resolve(result);
-          } catch (err: unknown) {
-            const m = err instanceof Error ? err.message : String(err);
-            await this.release(channel, clientId, requestId, false, m).catch(() => {});
-            ws.close();
-            reject(err);
-          }
-        } else if (msg.event === 'timeout') {
-          ws.close();
-          this.emit('timeout', { channel, requestId });
-          reject(new TurnqError('LEASE_EXPIRED', 'Turn timed out'));
-        } else if (msg.event === 'server-shutdown') {
-          ws.close();
-          reject(new Error('server_shutdown'));
-        }
-      });
-
-      ws.on('error', (err) => reject(err));
-      ws.on('close', (code) => {
-        if (code !== 1000) reject(new Error(`WebSocket closed: ${code}`));
-      });
-    });
   }
 
   private async runSse<T>(

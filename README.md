@@ -145,12 +145,12 @@ DELETE /channels/:name/holder             force-release current holder
 
 ## Protocol at a glance
 
-WebSocket-first, SSE fallback. HTTP for actions, WSS or SSE for notifications. JSON throughout.
+HTTP for actions, SSE for notifications. JSON throughout.
 
 ```
 POST   /channels                          create channel
 POST   /channels/{name}/enqueue           → { requestId, position }
-GET    /channels/{name}/subscribe         WSS or SSE stream
+GET    /channels/{name}/subscribe         SSE stream
 POST   /channels/{name}/release           complete turn
 POST   /channels/{name}/abort             leave queue
 ```

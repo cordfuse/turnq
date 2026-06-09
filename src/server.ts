@@ -1,7 +1,6 @@
 import { createServer } from 'http';
 import type { IncomingMessage, ServerResponse } from 'http';
 import express from 'express';
-import { WebSocket, WebSocketServer } from 'ws';
 import { randomUUID } from 'crypto';
 import { TurnqError } from './errors.ts';
 import { logger } from './logger.ts';
@@ -18,8 +17,8 @@ export interface TurnqServerOptions {
 }
 
 interface Subscriber {
-  type: 'ws' | 'sse';
   send(event: string, data: unknown): void;
+  ping(): void;
   close(): void;
 }
 
@@ -48,8 +47,6 @@ export class TurnqServer {
   private channels = new Map<string, Channel>();
   private app = express();
   private httpServer = createServer(this.app);
-  private wss = new WebSocketServer({ noServer: true });
-  private wsAlive = new WeakMap<WebSocket, boolean>();
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(opts?: TurnqServerOptions) {
@@ -57,7 +54,6 @@ export class TurnqServer {
     this.app.use(express.json());
     this.app.use(this.requestLogger);
     this.setupRoutes();
-    this.setupWss();
     this.setupHeartbeat();
 
     // restore persisted channels
@@ -238,7 +234,7 @@ export class TurnqServer {
     this.grantTurn(ch);
   }
 
-  private handleWsDisconnect(ch: Channel, entry: QueueEntry) {
+  private handleDisconnect(ch: Channel, entry: QueueEntry) {
     if (ch.active === entry) {
       if (ch.leaseTimer) { clearTimeout(ch.leaseTimer); ch.leaseTimer = null; }
       this.broadcast(ch, 'turn-completed', {
@@ -248,8 +244,7 @@ export class TurnqServer {
       ch.active = null;
       ch.queue.shift();
       metrics.queueDepth.set(ch.queue.length, { channel: ch.name });
-      metrics.activeConns.dec({ type: 'ws' });
-      logger.info('ws client disconnected (was active)', { channel: ch.name, clientId: entry.clientId });
+      logger.info('client disconnected (was active)', { channel: ch.name, clientId: entry.clientId });
       this.grantTurn(ch);
     } else {
       const idx = ch.queue.indexOf(entry);
@@ -262,28 +257,17 @@ export class TurnqServer {
           });
         }
         metrics.queueDepth.set(ch.queue.length, { channel: ch.name });
-        metrics.activeConns.dec({ type: 'ws' });
-        logger.debug('ws client disconnected (was queued)', { channel: ch.name, clientId: entry.clientId });
+        logger.debug('client disconnected (was queued)', { channel: ch.name, clientId: entry.clientId });
       }
     }
   }
 
-  private makeWsSubscriber(ws: WebSocket): Subscriber {
-    return {
-      type: 'ws',
-      send(event, data) {
-        if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ event, data }));
-      },
-      close() {
-        if (ws.readyState === WebSocket.OPEN) ws.close();
-      },
-    };
-  }
-
   private makeSseSubscriber(res: express.Response): Subscriber {
     return {
-      type: 'sse',
       send: (event, data) => this.sendSse(res, event, data),
+      // SSE comment line — keeps idle connections alive through proxies
+      // and load balancers without emitting a client-visible event.
+      ping: () => res.write(': keepalive\n\n'),
       close: () => res.end(),
     };
   }
@@ -457,7 +441,7 @@ export class TurnqServer {
 
       req.on('close', () => {
         metrics.activeConns.dec({ type: 'sse' });
-        this.handleWsDisconnect(ch, entry);
+        this.handleDisconnect(ch, entry);
       });
     });
 
@@ -545,85 +529,18 @@ export class TurnqServer {
     return ch.queue.find((e) => e.clientId === clientId && e.requestId === requestId) ?? null;
   }
 
-  private setupWss() {
-    this.httpServer.on('upgrade', async (req: IncomingMessage, socket, head) => {
-      const ok = await this.checkAuth(req);
-      if (!ok) {
-        socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
-        socket.destroy();
-        return;
-      }
-
-      const url = new URL(req.url ?? '/', 'http://localhost');
-      const path = url.pathname;
-      const subMatch = path.match(/^\/channels\/([^/]+)\/subscribe$/);
-      const obsMatch = path.match(/^\/channels\/([^/]+)\/observe$/);
-
-      if (subMatch) {
-        // URL.pathname does NOT decode %2F (Node + WHATWG URL preserve
-        // encoded slashes in path segments). Express HTTP handlers get
-        // auto-decoded :params; the WSS upgrade path is parsed manually
-        // here so we have to decode explicitly. Without this, channels
-        // namespaced with `<prefix>/<name>` (e.g. crosstalk's default
-        // `crosstalk/dispatch`) would never resolve at the WSS layer:
-        // the lookup key would be `crosstalk%2Fdispatch` and the channel
-        // was stored under `crosstalk/dispatch`. See client.ts URL
-        // encoding fix in this same release.
-        this.wss.handleUpgrade(req, socket, head, (ws) => this.handleWsSubscribe(ws, req, decodeURIComponent(subMatch[1])));
-      } else if (obsMatch) {
-        this.wss.handleUpgrade(req, socket, head, (ws) => this.handleWsObserve(ws, req, decodeURIComponent(obsMatch[1])));
-      } else {
-        socket.write('HTTP/1.1 404 Not Found\r\n\r\n');
-        socket.destroy();
-      }
-    });
-  }
-
+  // SSE comment-ping every connected subscriber and observer so idle
+  // streams survive proxy/LB idle timeouts. Disconnect detection is the
+  // existing req 'close' handler — no liveness bookkeeping needed.
   private setupHeartbeat() {
     const intervalMs = this.opts.heartbeatMs ?? 30_000;
     this.heartbeatTimer = setInterval(() => {
-      for (const ws of this.wss.clients) {
-        if (this.wsAlive.get(ws) === false) {
-          ws.terminate();
-          continue;
-        }
-        this.wsAlive.set(ws, false);
-        ws.ping();
+      for (const ch of this.channels.values()) {
+        // the active holder is still queue[0], so one pass covers everyone
+        for (const entry of ch.queue) entry.subscriber?.ping();
+        for (const obs of ch.observers) obs.ping();
       }
     }, intervalMs);
-  }
-
-  private handleWsSubscribe(ws: WebSocket, req: IncomingMessage, channelName: string) {
-    const url = new URL(req.url ?? '/', 'http://localhost');
-    const clientId = url.searchParams.get('clientId') ?? '';
-    const requestId = url.searchParams.get('requestId') ?? '';
-
-    const ch = this.channels.get(channelName);
-    if (!ch) { ws.close(1008, 'CHANNEL_NOT_FOUND'); return; }
-
-    const entry = this.findEntry(ch, clientId, requestId);
-    if (!entry) { ws.close(1008, 'NO_MATCHING_ENTRY'); return; }
-
-    this.wsAlive.set(ws, true);
-    ws.on('pong', () => this.wsAlive.set(ws, true));
-
-    metrics.activeConns.inc({ type: 'ws' });
-    const sub = this.makeWsSubscriber(ws);
-    this.attachSubscriber(ch, entry, sub);
-
-    ws.on('close', () => this.handleWsDisconnect(ch, entry));
-  }
-
-  private handleWsObserve(ws: WebSocket, req: IncomingMessage, channelName: string) {
-    const ch = this.channels.get(channelName);
-    if (!ch) { ws.close(1008, 'CHANNEL_NOT_FOUND'); return; }
-
-    this.wsAlive.set(ws, true);
-    ws.on('pong', () => this.wsAlive.set(ws, true));
-
-    const sub = this.makeWsSubscriber(ws);
-    ch.observers.add(sub);
-    ws.on('close', () => ch.observers.delete(sub));
   }
 
   async start(port?: number): Promise<void> {
@@ -658,9 +575,7 @@ export class TurnqServer {
       for (const obs of ch.observers) obs.close();
     }
 
-    for (const client of this.wss.clients) client.terminate();
     this.httpServer.closeAllConnections?.();
-    this.wss.close();
 
     return new Promise((resolve, reject) => {
       if (!this.httpServer.listening) { resolve(); return; }

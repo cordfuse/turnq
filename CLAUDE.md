@@ -2,13 +2,13 @@
 
 # turnq — Claude context
 
-Status: **Phase 1 complete**. Core scaffolded, 18/18 tests pass. `SPEC.md` still pending. See [PLAN.md](PLAN.md).
+Status: **v0.4.0 — SSE-only**. WSS dropped entirely (see Doctrine). See [PLAN.md](PLAN.md) — its WSS-first transport sections are superseded by v0.4.
 
 ## Project
 
-`@cordfuse/turnq` — pronounced "token." Named-channel turn coordinator. WSS-first/SSE-fallback protocol. Express/Bun/TypeScript server, TypeScript client. One unified package with subpath exports (`./server`, `./client`).
+`@cordfuse/turnq` — pronounced "token." Named-channel turn coordinator. HTTP actions + SSE notifications. Express/Bun/TypeScript server, TypeScript client. One unified package with subpath exports (`./server`, `./client`).
 
-**Near-term driver:** Crosstalk. v1.0 exists to replace `pushWithRetry` / jitter in `cordfuse/crosstalk-runtime`. Politik is a named v1.1+ consumer but does not shape v1.0 scope. If you find a design decision being pulled by a non-Crosstalk requirement, that's the signal to push back.
+**Near-term driver:** Crosstalk. turnq exists to reduce git push contention in `cordfuse/crosstalk` (v6 runtime) — and it is **advisory** there: the consumer proceeds without the lock on timeout or error, git arbitrates. Politik is a named future consumer but does not shape scope. If you find a design decision being pulled by a non-Crosstalk requirement, that's the signal to push back.
 
 ## What this repo is for right now
 
@@ -25,7 +25,7 @@ Phase 1 is complete (core scaffolded, tests passing). Phase 2 hardening is next.
 
 - Server is Express/Bun/TypeScript only. No other server implementations planned.
 - One unified package `@cordfuse/turnq`. Subpath exports `./server` and `./client`. No split packages.
-- Client negotiates WSS first; falls back to SSE automatically. Both connection types supported on the same server endpoint.
+- **SSE-only since v0.4.0 — do not reintroduce WebSocket.** The subscribe channel is one-directional (server notifies "your-turn"); all client→server actions are plain HTTP POSTs, so duplex bought nothing. Both confirmed 0.3.x bugs lived in the hand-rolled WSS upgrade path (un-decoded %2F params; suspected open-vs-message handshake race that wedged a crosstalk dispatcher). SSE goes through Express routing: auto-decoded params, same auth middleware as every route, no upgrade parsing.
 - Client examples: TypeScript (canonical, in `src/client.ts`), curl, Go. No Python.
 - OpenAPI is complementary, not a replacement for SPEC.md + examples. Defer to v1.1+.
 - The noun *turn* stays — agents take *turns* on channels. `withTurn`, `your-turn`, `turn-completed` all keep "turn" as the unit of work.
