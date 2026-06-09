@@ -560,9 +560,18 @@ export class TurnqServer {
       const obsMatch = path.match(/^\/channels\/([^/]+)\/observe$/);
 
       if (subMatch) {
-        this.wss.handleUpgrade(req, socket, head, (ws) => this.handleWsSubscribe(ws, req, subMatch[1]));
+        // URL.pathname does NOT decode %2F (Node + WHATWG URL preserve
+        // encoded slashes in path segments). Express HTTP handlers get
+        // auto-decoded :params; the WSS upgrade path is parsed manually
+        // here so we have to decode explicitly. Without this, channels
+        // namespaced with `<prefix>/<name>` (e.g. crosstalk's default
+        // `crosstalk/dispatch`) would never resolve at the WSS layer:
+        // the lookup key would be `crosstalk%2Fdispatch` and the channel
+        // was stored under `crosstalk/dispatch`. See client.ts URL
+        // encoding fix in this same release.
+        this.wss.handleUpgrade(req, socket, head, (ws) => this.handleWsSubscribe(ws, req, decodeURIComponent(subMatch[1])));
       } else if (obsMatch) {
-        this.wss.handleUpgrade(req, socket, head, (ws) => this.handleWsObserve(ws, req, obsMatch[1]));
+        this.wss.handleUpgrade(req, socket, head, (ws) => this.handleWsObserve(ws, req, decodeURIComponent(obsMatch[1])));
       } else {
         socket.write('HTTP/1.1 404 Not Found\r\n\r\n');
         socket.destroy();
