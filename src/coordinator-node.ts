@@ -104,17 +104,12 @@ export async function createCoordinator(opts?: CoordinatorOptions): Promise<Coor
     try {
       const res = await fetch(`${url}/health`, { signal: AbortSignal.timeout(3000) });
       if (res.ok) {
-        console.log(`[turnq] distributed — ${url}`);
         return new TurnqClient(url, { apiKey });
       }
     } catch {}
     if (!fallback) throw new Error(`[turnq] ${url} unreachable`);
-    console.warn(`[turnq] ${url} unreachable — falling back to local lockfile`);
   } else if (url || apiKey) {
     if (!fallback) throw new Error('[turnq] both url and apiKey required for distributed mode');
-    console.warn('[turnq] url or apiKey missing — using local lockfile');
-  } else {
-    console.log('[turnq] local lockfile mode');
   }
 
   return new LockfileCoordinator();
